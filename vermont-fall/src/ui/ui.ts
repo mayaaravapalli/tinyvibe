@@ -150,6 +150,8 @@ export class Ui {
       const x = (p.x * 0.5 + 0.5) * w
       const y = (-p.y * 0.5 + 0.5) * h
       this.carTag.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`
+      // keep the label on screen: hang it to the left near the right edge
+      this.carTag.classList.toggle('is-flip', x > w - 190)
       if (!this.carTag.classList.contains('is-on')) {
         this.carTag.classList.add('is-on')
         this.carTag.tabIndex = 0

@@ -12,26 +12,26 @@ export interface CameraPose {
  * little and follows the pointer, but can never be spun into a bad composition.
  */
 export class AerialRig {
-  target = new Vector3(50, 0, -170)
+  target = new Vector3(55, 0, -150)
   yaw = MathUtils.degToRad(3) // around the target, 0 = looking north
-  pitch = MathUtils.degToRad(19)
-  dist = 1600
-  fov = 31
+  pitch = MathUtils.degToRad(16.5)
+  dist = 1640
+  fov = 32
 
   /** Two art-directed framings: wide for landscape, a taller look down the valley for portrait. */
   setFraming(portrait: boolean) {
     if (portrait) {
-      this.target.set(160, 0, -110)
-      this.yaw = MathUtils.degToRad(-2)
-      this.pitch = MathUtils.degToRad(29)
-      this.dist = 2000
+      this.target.set(290, 0, -170)
+      this.yaw = MathUtils.degToRad(-6)
+      this.pitch = MathUtils.degToRad(25)
+      this.dist = 1900
       this.fov = 46
     } else {
-      this.target.set(50, 0, -170)
+      this.target.set(55, 0, -150)
       this.yaw = MathUtils.degToRad(3)
-      this.pitch = MathUtils.degToRad(19)
-      this.dist = 1600
-      this.fov = 31
+      this.pitch = MathUtils.degToRad(16.5)
+      this.dist = 1640
+      this.fov = 32
     }
   }
 

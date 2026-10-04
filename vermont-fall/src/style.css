@@ -192,6 +192,15 @@ body {
   -webkit-backdrop-filter: blur(8px);
   transition: background 0.3s var(--vf-ease), transform 0.3s var(--vf-ease);
 }
+.vf-cartag.is-flip .vf-cartag-line {
+  left: -10px;
+  transform: rotate(-24deg);
+  transform-origin: bottom right;
+}
+.vf-cartag.is-flip .vf-cartag-text {
+  left: auto;
+  right: 22px;
+}
 .vf-cartag.is-hot .vf-cartag-text,
 .vf-cartag:hover .vf-cartag-text {
   background: var(--vf-glass-hi);
