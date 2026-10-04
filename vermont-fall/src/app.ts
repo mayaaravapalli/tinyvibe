@@ -32,7 +32,8 @@ import { buildRoadMesh } from './world/roadMesh'
 import { buildSky } from './world/sky'
 import { Terrain } from './world/terrain'
 import { buildTerrainMesh } from './world/terrainMesh'
-import { Forest, U_WIND_VIS, buildFarLumps, placeTrees } from './world/trees'
+import { Forest, U_WIND_VIS, buildFarLumps, makeMaterials, placeTrees } from './world/trees'
+import { UndergrowthKit } from './world/undergrowth'
 import { WindField } from './world/wind'
 import { Leaves, WindshieldLeaf } from './world/leaves'
 import { Birds, Smoke } from './world/ambient'
@@ -190,7 +191,7 @@ export class App {
       return rt.texture
     })
     const q = this.opts.quality
-    U.uLodRange.value.set(q.nearRange[0], q.nearRange[1])
+    U.uLodRange.value.set(q.nearRange[0], q.nearRange[1], q.nearRange[2], q.nearRange[3])
     const trees = this.time('treePlace', () => placeTrees(this.terrain, tm.sunVisAt, U.uSunDir.value, q.treeDensity))
     this.stats.trees = trees.count
     const hueCount = [0, 0, 0, 0, 0]
@@ -211,7 +212,9 @@ export class App {
     this.scene.add(this.buildings.group)
     this.scene.add(this.time('props', () => buildProps(this.terrain, this.buildings.mailboxes)).group)
     const atlas = makeLeafAtlas()
-    this.ground = this.time('ground', () => new GroundDetail(this.terrain, trees, atlas, q.grassDensity))
+    const underMats = makeMaterials('under', this.forest.leafTex)
+    const kit = new UndergrowthKit(underMats.mat, underMats.depth)
+    this.ground = this.time('ground', () => new GroundDetail(this.terrain, trees, atlas, q.grassDensity, kit, tm.sunVisAt))
     this.scene.add(this.ground.group)
     this.leaves = new Leaves(this.terrain, this.forest, this.wind, atlas, q.leaves)
     this.scene.add(this.leaves.mesh)

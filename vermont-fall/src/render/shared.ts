@@ -36,8 +36,8 @@ export const U = {
   uCloudShadow: { value: 0.32 },
   /** 0 aerial, 1 POV — lets shaders shift detail with the camera */
   uPov: { value: 0 },
-  /** near-tree radius used for LOD cross fades: x = start, y = end */
-  uLodRange: { value: new Vector2(95, 135) },
+  /** tree LOD cross-fade distances: near fade start/end, mid fade start/end */
+  uLodRange: { value: new Vector4(55, 70, 230, 270) },
 }
 
 export type SharedUniforms = typeof U

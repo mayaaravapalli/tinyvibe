@@ -323,11 +323,16 @@ function stones(T: Terrain, group: Group) {
     fragmentPars: SRGB,
     fragmentColor: /* glsl */ `
       {
-        float n = vfNoise(vAtmoWorld.xz * 2.1 + vAtmoWorld.y * 3.3);
-        vec3 c = mix(srgb(0.40, 0.39, 0.37), srgb(0.56, 0.55, 0.51), n);
-        float moss = smoothstep(0.55, 0.85, vfNoise(vAtmoWorld.xz * 1.7 + 4.0)) * smoothstep(0.0, 0.6, vNormal.y * 0.5 + 0.5);
-        c = mix(c, srgb(0.36, 0.42, 0.24), moss * 0.6);
-        c = mix(c, srgb(0.70, 0.68, 0.55), smoothstep(0.8, 0.95, vfNoise(vAtmoWorld.xz * 6.0)) * 0.5);
+        // granite: grain, darker cracks, moss on the tops, pale lichen rosettes
+        vec3 q = vAtmoWorld;
+        float n = vfNoise3(q * 2.1) * 0.6 + vfNoise3(q * 7.3) * 0.4;
+        vec3 c = mix(srgb(0.36, 0.35, 0.33), srgb(0.56, 0.55, 0.51), n);
+        float crack = smoothstep(0.03, 0.0, abs(vfNoise3(q * 1.4) - 0.5));
+        c *= 1.0 - crack * 0.45;
+        float moss = smoothstep(0.5, 0.8, vfNoise3(q * 1.1 + 4.0)) * smoothstep(0.2, 0.8, vNormal.y * 0.5 + 0.5);
+        c = mix(c, srgb(0.30, 0.38, 0.17), moss * 0.7);
+        float lich = smoothstep(0.78, 0.86, vfNoise3(q * 3.7 + 9.0));
+        c = mix(c, srgb(0.72, 0.72, 0.6), lich * 0.55);
         diffuseColor.rgb = c;
       }
     `,

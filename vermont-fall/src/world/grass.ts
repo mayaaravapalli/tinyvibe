@@ -1,5 +1,6 @@
 import {
   BufferAttribute,
+  Color,
   BufferGeometry,
   DoubleSide,
   Group,
@@ -17,6 +18,7 @@ import { forestDensity } from './forest'
 import type { Terrain } from './terrain'
 import type { TreeData } from './trees'
 import { FENCE_RUNS } from './props'
+import { UNDER_PALETTE, type UnderInstance, type UndergrowthKit } from './undergrowth'
 
 /**
  * Ground detail along the road corridor, seen only from the car: golden autumn
@@ -33,11 +35,11 @@ function bladeClump(): BufferGeometry {
   const tip: number[] = []
   const idx: number[] = []
   const rnd = mulberry32(5)
-  for (let b = 0; b < 5; b++) {
+  for (let b = 0; b < 6; b++) {
     const a = rnd() * Math.PI * 2
     const ox = Math.cos(a) * 0.16 * rnd(), oz = Math.sin(a) * 0.16 * rnd()
     const lean = 0.15 + rnd() * 0.3
-    const w = 0.022 + rnd() * 0.014
+    const w = 0.03 + rnd() * 0.02
     const h = 0.55 + rnd() * 0.45
     const dx = Math.cos(a + 1.57), dz = Math.sin(a + 1.57)
     const base = pos.length / 3
@@ -100,7 +102,14 @@ export class GroundDetail {
     return a * (1 - ts) + b * ts
   }
 
-  constructor(T: Terrain, trees: TreeData, leafAtlas: Texture, density = 1) {
+  constructor(
+    T: Terrain,
+    trees: TreeData,
+    leafAtlas: Texture,
+    density = 1,
+    kit: UndergrowthKit | null = null,
+    sunVisAt: (x: number, z: number) => number = () => 1,
+  ) {
     this.vergeNs = Math.ceil(T.road.length / 3)
     this.vergeGrid = new Float32Array(this.vergeNs * this.vergeLat)
     {
@@ -148,7 +157,7 @@ export class GroundDetail {
         varying float vTipG;
       `,
       fragmentColor: /* glsl */ `
-        diffuseColor.rgb = vGCol * mix(0.42, 1.12, vTipG);
+        diffuseColor.rgb = vGCol * mix(0.55, 1.0, vTipG);
       `,
     })
     const leafMat = patchMaterial(new MeshLambertMaterial({ map: leafAtlas, alphaTest: 0.5, side: DoubleSide }), {
@@ -192,9 +201,9 @@ export class GroundDetail {
       let n = 0
       // grass: thick on the mown verge, thinning into the fields and the woods
       const bands: [number, number, number][] = [
-        [5.9, 10, 7],
+        [5.9, 10, 10],
         [10, 20, 2.0],
-        [20, 32, 0.8],
+        [20, 32, 0.5],
       ]
       for (const [l0, l1, per] of bands) {
         const count = Math.floor(CHUNK * 2 * (l1 - l0) * per * density)
@@ -218,7 +227,9 @@ export class GroundDetail {
           const g1 = hash2(Math.floor(x * 0.25), Math.floor(z * 0.25), 3)
           const green = smoothstep(0.55, 0.9, g1) * 0.7
           const tone = 0.85 + rnd() * 0.3
-          gc.push((0.62 - 0.26 * green) * tone, (0.52 + 0.02 * green) * tone, (0.26 - 0.06 * green) * tone)
+          // tawny straw, russet, and the last late-season green
+          const rus = smoothstep(0.7, 0.95, hash2(Math.floor(x * 0.6), Math.floor(z * 0.6), 9)) * 0.6
+          gc.push((0.5 - 0.22 * green + 0.06 * rus) * tone, (0.4 + 0.04 * green - 0.1 * rus) * tone, (0.17 - 0.04 * green - 0.04 * rus) * tone)
           center.x += x
           center.y += y
           center.z += z
@@ -276,6 +287,42 @@ export class GroundDetail {
           lc.push(base[0] * fade + 0.15 * (1 - fade), base[1] * fade + 0.08 * (1 - fade), base[2] * fade + 0.03 * (1 - fade), Math.floor(rnd() * 4))
         }
       }
+      // undergrowth: ferns on the forest floor, shrubs and sumac at the edges,
+      // goldenrod and asters gone to seed in the open
+      const under: UnderInstance[] = []
+      if (kit) {
+        const pick = <T,>(arr: T[]) => arr[Math.floor(rnd() * arr.length)]
+        const place = (kind: UnderInstance['kind'], l0: number, l1: number, attempts: number, accept: (f: number) => number, sMin: number, sMax: number, pal: Color[]) => {
+          for (let k = 0; k < attempts * density; k++) {
+            const s = c0 + rnd() * CHUNK
+            let db = Math.abs(s - T.bridge.s)
+            db = Math.min(db, L - db)
+            if (db < 22) continue
+            const side = rnd() > 0.5 ? 1 : -1
+            const lat = side * (l0 + Math.pow(rnd(), 1.4) * (l1 - l0))
+            const fd = this.verge(s, lat)
+            if (rnd() > accept(fd)) continue
+            r.sample(s, f)
+            const x = f.x - f.tz * lat, z = f.z + f.tx * lat
+            if (T.roadNearest(x, z, 6.2, hit)) continue
+            if (T.streamNearest(x, z, 3.2, hit)) continue
+            under.push({
+              kind,
+              x, z,
+              y: T.heightAt(x, z) - 0.03,
+              rot: rnd() * Math.PI * 2,
+              scale: sMin + rnd() * (sMax - sMin),
+              color: pick(pal).clone().multiplyScalar(0.85 + rnd() * 0.3),
+              sun: sunVisAt(x, z),
+            })
+          }
+        }
+        place('fern', 6.3, 24, 700, (fd) => smoothstep(0.15, 0.5, fd), 0.8, 1.5, UNDER_PALETTE.fern)
+        place('shrub', 6.6, 20, 90, (fd) => smoothstep(0.1, 0.35, fd) * (1 - smoothstep(0.8, 0.98, fd)), 0.7, 1.3, UNDER_PALETTE.shrub)
+        place('sumac', 7, 18, 40, (fd) => smoothstep(0.02, 0.15, fd) * (1 - smoothstep(0.35, 0.65, fd)), 0.8, 1.25, UNDER_PALETTE.sumac)
+        place('goldenrod', 7, 30, 240, (fd) => 1 - smoothstep(0.05, 0.3, fd), 0.6, 1.05, UNDER_PALETTE.goldenrod)
+        place('aster', 6.5, 24, 150, (fd) => 1 - smoothstep(0.05, 0.3, fd), 0.7, 1.2, UNDER_PALETTE.aster)
+      }
       if (!n) continue
       center.multiplyScalar(1 / n)
       const meshes: Mesh[] = []
@@ -313,6 +360,7 @@ export class GroundDetail {
         m.frustumCulled = true
         meshes.push(m)
       }
+      if (kit && under.length) meshes.push(...kit.meshes(under))
       for (const m of meshes) {
         m.visible = false
         this.group.add(m)
@@ -325,7 +373,7 @@ export class GroundDetail {
   update(cam: Vector3, aboveGround: number) {
     const on = aboveGround < 60
     for (const c of this.chunks) {
-      const vis = on && c.center.distanceToSquared(cam) < 170 * 170
+      const vis = on && c.center.distanceToSquared(cam) < 130 * 130
       for (const m of c.mesh) m.visible = vis
     }
   }

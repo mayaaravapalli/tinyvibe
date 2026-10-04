@@ -11,14 +11,14 @@ export interface Quality {
   grassDensity: number
   leaves: number
   nearTrees: boolean
-  nearRange: [number, number]
+  nearRange: [number, number, number, number]
   antialias: boolean
 }
 
 const TIERS: Record<Quality['name'], Omit<Quality, 'pixelRatio'> & { maxDpr: number }> = {
-  high: { name: 'high', maxDpr: 2, shadowMap: 4096, treeDensity: 1, lumpDensity: 1, grassDensity: 1, leaves: 720, nearTrees: true, nearRange: [95, 135], antialias: true },
-  medium: { name: 'medium', maxDpr: 1.5, shadowMap: 2048, treeDensity: 0.7, lumpDensity: 0.55, grassDensity: 0.55, leaves: 480, nearTrees: true, nearRange: [80, 115], antialias: true },
-  low: { name: 'low', maxDpr: 1.25, shadowMap: 2048, treeDensity: 0.45, lumpDensity: 0.35, grassDensity: 0.3, leaves: 280, nearTrees: true, nearRange: [60, 90], antialias: true },
+  high: { name: 'high', maxDpr: 2, shadowMap: 4096, treeDensity: 1, lumpDensity: 1, grassDensity: 1, leaves: 720, nearTrees: true, nearRange: [55, 70, 230, 270], antialias: true },
+  medium: { name: 'medium', maxDpr: 1.5, shadowMap: 2048, treeDensity: 0.7, lumpDensity: 0.55, grassDensity: 0.55, leaves: 480, nearTrees: true, nearRange: [45, 58, 170, 205], antialias: true },
+  low: { name: 'low', maxDpr: 1.25, shadowMap: 2048, treeDensity: 0.45, lumpDensity: 0.35, grassDensity: 0.3, leaves: 280, nearTrees: true, nearRange: [34, 44, 115, 140], antialias: true },
 }
 
 function gpuName(): string {

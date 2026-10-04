@@ -19,7 +19,7 @@ import {
 } from 'three'
 import { hash2, mulberry32, smoothstep } from '../core/noise'
 import { GLSL_BUMP, GLSL_SUN_SHADOW, U, patchDepthMaterial, patchMaterial, type PatchOptions } from '../render/shared'
-import { makeLeafClusterTexture } from '../render/leafTexture'
+import { makeFoliageAtlas } from '../render/leafTexture'
 import { PALETTE, evergreenChance, hardwoodHue, standLean, treeColor, type Hue } from './colors'
 import { TREE_RECT, forestDensity, treeRegionWeight } from './forest'
 import { LONE_TREES } from './layout'
@@ -168,8 +168,8 @@ attribute vec2 aSite; // x slope light, y hill shadow
 uniform sampler2D uWindTex;
 uniform vec4 uWindRect;
 uniform vec2 uAmbientWind;
-uniform vec2 uLodRange;
-uniform float uLodMode; // 0 = far (fades out near camera), 1 = near (fades in)
+uniform vec4 uLodRange; // near fade start/end, mid fade start/end
+uniform float uLodMode; // 0 = far, 1 = mid, 2 = near, 3 = undergrowth, 4 = shadow proxy
 uniform float uWindVis; // exaggerates sway when seen from far above
 uniform float uCullBehind; // 1 in the colour pass only (shadows come from behind too)
 varying vec4 vFol;
@@ -178,14 +178,17 @@ varying float vGust;
 varying float vLodFade;
 varying vec2 vSite;
 varying vec2 vLeafUv;
+varying vec3 vRest;
 `
 
 const WIND_VERTEX_WORLD = /* glsl */ `
   mat4 im = modelMatrix * instanceMatrix;
   vec3 root = im[3].xyz;
   vfWorld = im * vec4(transformed, 1.0);
-  // trees well behind the main camera (POV) do no further work
-  bool vfBehind = dot(root - uViewPos, uViewDir) < -35.0 && uLodMode < 1.5;
+  // texture space stays pinned to the tree at rest, so bark and leaves don't swim as it sways
+  vRest = vfWorld.xyz;
+  // trees well behind the main camera do no further work
+  bool vfBehind = dot(root - uViewPos, uViewDir) < -35.0;
   float H = aSeed.y;
   vec2 wuv = (root.xz - uWindRect.xy) * uWindRect.zw;
   vec4 wind = texture2D(uWindTex, wuv);
@@ -202,18 +205,22 @@ const WIND_VERTEX_WORLD = /* glsl */ `
   // clumps and leaves flutter, more inside a gust
   vec3 wn = normalize((im * vec4(normal, 0.0)).xyz);
   float fl = step(0.5, aFol.w) * (0.04 + 0.32 * wind.b) * sin(uTime * (4.5 + 3.0 * aFol.y) + aFol.y * 37.0 + aSeed.x * 3.0);
-  vfWorld.xyz += wn * fl * (0.4 + hf) * (aFol.w > 1.5 ? 1.6 : 1.0);
+  vfWorld.xyz += wn * fl * (0.4 + hf) * (aFol.w > 1.5 ? 1.4 : 1.0);
   vfWorld.xz += disp * step(0.5, aFol.w) * 0.25 * sin(uTime * 2.1 + aFol.y * 12.0) * hf;
   vFol = aFol;
   vTint = mix(aBark, aTint, step(0.5, aFol.w));
   vGust = wind.b;
   vSite = aSite;
   vLeafUv = uv;
-  // LOD cross-fade against the main view camera (also valid in the shadow pass)
-  // the detailed tree fades in (dithered) over a still-solid far tree, and the far
-  // tree only dissolves once it is hidden inside the near one: no visible stipple
+  // three-level cross-fade against the main view camera (also valid in the shadow pass):
+  // the more detailed tree dithers in over a still-solid coarser one, and the coarser
+  // one only dissolves once it is hidden inside: no visible stipple
   float dv = distance(root, uViewPos);
-  vLodFade = uLodMode < 0.5 ? smoothstep(uLodRange.x - 14.0, uLodRange.x, dv) : 1.0 - smoothstep(uLodRange.x, uLodRange.y, dv);
+  if (uLodMode > 3.5) vLodFade = smoothstep(uLodRange.x - 14.0, uLodRange.x, dv);
+  else if (uLodMode > 2.5) vLodFade = 1.0 - smoothstep(uLodRange.z * 0.55, uLodRange.z * 0.7, dv);
+  else if (uLodMode > 1.5) vLodFade = 1.0 - smoothstep(uLodRange.x, uLodRange.y, dv);
+  else if (uLodMode > 0.5) vLodFade = min(smoothstep(uLodRange.x - 10.0, uLodRange.x, dv), 1.0 - smoothstep(uLodRange.z, uLodRange.w, dv));
+  else vLodFade = smoothstep(uLodRange.z - 14.0, uLodRange.z, dv);
   if (vLodFade <= 0.001 || (vfBehind && uCullBehind > 0.5)) vfWorld = vec4(0.0, -1.0e5, 0.0, 1.0);
 `
 
@@ -225,12 +232,18 @@ const LOD_DISCARD = /* glsl */ `
 
 const CARD_ALPHA = /* glsl */ `
   float vfCardLum = 1.0;
+  float vfCardVar = 0.5;
+  float vfStem = 0.0;
+  float vfTile = -1.0;
   if (vFol.w > 1.5) {
     vec4 lt = texture2D(uLeafTex, vLeafUv);
     // sharpened alpha test keeps cards from thinning out in the mip chain
     float a = (lt.a - 0.5) / max(fwidth(lt.a), 1e-4) + 0.5;
     if (a < 0.5) discard;
     vfCardLum = lt.r;
+    vfCardVar = lt.g;
+    vfStem = lt.b;
+    vfTile = floor(vLeafUv.x * 4.0) + floor(vLeafUv.y * 2.0) * 4.0;
   }
 `
 
@@ -242,6 +255,23 @@ const FRAG_PARS = /* glsl */ `
   varying float vLodFade;
   varying vec2 vSite;
   varying vec2 vLeafUv;
+  varying vec3 vRest;
+`
+
+/** per-leaf colour drift: one crown shows many shades of its season */
+export const GLSL_LEAF_VAR = /* glsl */ `
+vec3 vfLeafColor(vec3 base, float gv, float outer, bool needles) {
+  if (needles) return base * (0.82 + 0.36 * gv);
+  vec3 warm = base * vec3(1.24, 0.74, 0.6);
+  vec3 light = base * vec3(1.02, 1.22, 0.78) + vec3(0.018, 0.014, 0.0);
+  vec3 c = gv < 0.5 ? mix(warm, base, gv * 2.0) : mix(base, light, gv * 2.0 - 1.0);
+  // trees turn from the outside in: shaded inner leaves hold on to some green-gold
+  c = mix(c, light * vec3(0.92, 1.06, 0.8), (1.0 - smoothstep(0.45, 0.9, outer)) * 0.35);
+  // the odd leaf still green, the odd one already brown
+  c = mix(c, vec3(0.085, 0.13, 0.035), step(0.955, gv) * 0.65);
+  c = mix(c, vec3(0.15, 0.075, 0.03), step(gv, 0.04) * 0.7);
+  return c;
+}
 `
 
 function treePatch(key: string, leafTex: Texture): PatchOptions {
@@ -256,6 +286,7 @@ function treePatch(key: string, leafTex: Texture): PatchOptions {
       ${FRAG_PARS}
       ${GLSL_SUN_SHADOW}
       ${GLSL_BUMP}
+      ${GLSL_LEAF_VAR}
       // leaf-cluster height field (metres), shared by colour and normal
       float vfLeafH(vec3 wp) {
         vec3 p = wp * 1.45;
@@ -267,31 +298,59 @@ function treePatch(key: string, leafTex: Texture): PatchOptions {
       ${CARD_ALPHA}
       float vfDistV = length(vViewPosition);
       float vfLeaf = 0.5;
+      float vfBarkH = 0.5;
       {
         vec3 c = vTint;
-        if (vFol.w > 0.5) {
-          vfLeaf = vfLeafH(vAtmoWorld);
-          float lm2 = vfNoise3(vAtmoWorld * 0.42 + 7.0);
-          // leaf clusters vs. the dark pockets between them (fades to the mean with distance)
-          float detail = 1.0 - smoothstep(90.0, 420.0, vfDistV);
-          float cl = mix(0.82, mix(0.5, 1.12, smoothstep(0.32, 0.68, vfLeaf)), detail);
-          if (vFol.w > 1.5) cl = mix(0.75, 1.15, vfCardLum) * mix(0.9, 1.05, vfLeaf);
-          c *= cl;
-          c *= 0.82 + 0.3 * vFol.y;
-          c *= 0.86 + 0.28 * lm2;
-          // leaves flipping in a gust show their paler undersides
+        if (vFol.w > 1.5 && vfStem > 0.5) {
+          // the twigs and stalks drawn on a card are wood; asters keep their golden centres
+          if (abs(vfTile - 7.0) < 0.5) c = vfCardLum > 0.7 ? vec3(0.62, 0.42, 0.04) : vec3(0.09, 0.09, 0.04);
+          else c = vec3(0.055, 0.04, 0.03) * vFol.z;
+        } else if (vFol.w > 0.5) {
+          vfLeaf = vfLeafH(vRest);
+          float lm2 = vfNoise3(vRest * 0.42 + 7.0);
+          if (vFol.w > 1.5) {
+            bool needles = abs(vfTile - 3.0) < 0.5;
+            c = vfLeafColor(vTint, vfCardVar, vFol.z, needles) * mix(0.6, 1.12, vfCardLum);
+          } else {
+            // leaf clusters vs. the dark pockets between them (fades to the mean with distance)
+            float detail = 1.0 - smoothstep(90.0, 420.0, vfDistV);
+            c *= mix(0.82, mix(0.5, 1.12, smoothstep(0.32, 0.68, vfLeaf)), detail);
+            // seen from the road, coarse crowns get per-leaf colour speckle instead of a smooth ball
+            float sp = vfNoise3(vRest * 3.1 + vFol.y * 5.0);
+            c = mix(c, vfLeafColor(c, sp, vFol.z, false), uPov * 0.8);
+          }
+          c *= 0.86 + 0.22 * vFol.y;
+          c *= 0.88 + 0.24 * lm2;
+          // leaves flipping in a gust show their paler undersides; conifers barely flash
           float g = clamp(vGust, 0.0, 1.0);
-          // undersides are paler and less saturated; conifers barely flash
           float lum = dot(c, vec3(0.3, 0.55, 0.15));
           float broad = smoothstep(0.02, 0.09, max(c.r, c.g) - c.b * 0.5);
           vec3 under = mix(c, vec3(lum) * vec3(1.1, 1.0, 0.82), 0.35) * 1.7 + vec3(0.05, 0.04, 0.02) * broad;
-          float tw = 0.55 + 0.45 * sin(uTime * 7.0 + vFol.y * 23.0 + vAtmoWorld.x * 0.7);
+          float tw = 0.55 + 0.45 * sin(uTime * 7.0 + vFol.y * 23.0 + vRest.x * 0.7);
           c = mix(c, under, g * broad * (0.5 + 0.5 * vfLeaf) * tw);
-          c *= vFol.z;
+          // from the road, soften the crown-underside darkening that makes coarse crowns read as balls
+          c *= vFol.w < 1.5 ? mix(vFol.z, mix(0.5, 1.0, vFol.z), uPov) : vFol.z;
           // whole hillsides brighten where they face the low sun
           c *= mix(0.8, 1.18, clamp((vSite.x - 0.35) / 1.25, 0.0, 1.0));
         } else {
-          c *= vFol.z * (0.8 + 0.3 * vfNoise3(vAtmoWorld * vec3(6.0, 0.8, 6.0)));
+          // bark: white birch with dark lenticels, or furrowed grey-brown with lichen
+          float ang = vLeafUv.x * 6.2831;
+          vec3 cyl = vec3(cos(ang) * 1.6, sin(ang) * 1.6, vRest.y);
+          float bl = dot(vTint, vec3(0.3, 0.55, 0.15));
+          if (bl > 0.35) {
+            float lent = smoothstep(0.64, 0.7, vfNoise3(cyl * vec3(1.0, 1.0, 7.0) + vFol.y * 9.0));
+            float scar = smoothstep(0.76, 0.84, vfNoise3(cyl * vec3(0.7, 0.7, 0.9) + 4.0));
+            c = vTint * (0.86 + 0.14 * vfNoise3(cyl * 3.0));
+            c = mix(c, vec3(0.025, 0.022, 0.02), max(lent * 0.85, scar * 0.9));
+            c = mix(c, vec3(0.045, 0.04, 0.035), (1.0 - smoothstep(0.0, 0.07, vFol.x)) * 0.75);
+            vfBarkH = 1.0 - lent * 0.5;
+          } else {
+            float fur = vfNoise3(cyl * vec3(2.6, 2.6, 0.9) + vFol.y * 5.0) * 0.7 + vfNoise3(cyl * vec3(6.0, 6.0, 2.5)) * 0.3;
+            vfBarkH = fur;
+            c = vTint * mix(0.42, 1.22, smoothstep(0.28, 0.72, fur));
+            c = mix(c, vec3(0.12, 0.14, 0.085), smoothstep(0.6, 0.78, vfNoise3(vRest * 1.3)) * 0.45);
+          }
+          c *= mix(0.55, 1.0, vFol.z);
         }
         diffuseColor.rgb = c;
       }
@@ -299,26 +358,32 @@ function treePatch(key: string, leafTex: Texture): PatchOptions {
       if (vFol.w > 0.5 && vFol.w < 1.5) {
         vec3 vd = normalize(vViewPosition);
         float facing = abs(dot(normalize(vNormal), vd));
-        float leafy = vfNoise3(vAtmoWorld * 2.6 + vFol.y * 10.0);
-        if (facing < 0.24 && leafy > facing * 3.6 + 0.22) discard;
+        float leafy = vfNoise3(vRest * 2.6 + vFol.y * 10.0);
+        // and from the road a coarser bite out of the outline, so crowns aren't perfect balls
+        float notch = vfNoise3(vRest * 0.55 + vFol.y * 3.0);
+        float cut = mix(0.24, 0.42, uPov);
+        if (facing < cut && max(leafy, notch * uPov) > facing * (3.6 - 1.6 * uPov) + 0.22) discard;
       }
     `,
     fragmentNormal: /* glsl */ `
-      if (vFol.w > 0.5) {
+      if (vFol.w > 0.5 && vFol.w < 1.5) {
         float bf = 1.0 - smoothstep(50.0, 240.0, vfDistV);
         if (bf > 0.0) normal = vfBump(normal, -vViewPosition, vfLeaf * 0.16 * bf, faceDirection);
+      } else if (vFol.w < 0.5) {
+        float bb = 1.0 - smoothstep(8.0, 35.0, vfDistV);
+        if (bb > 0.0) normal = vfBump(normal, -vViewPosition, vfBarkH * 0.035 * bb, faceDirection);
       }
     `,
     fragmentOutgoing: /* glsl */ `
-      if (vFol.w > 0.5) {
+      if (vFol.w > 0.5 && vfStem < 0.5) {
         // translucency: the low sun shining through thin leaves towards the viewer.
         // Self-shadowing must not kill it — light passes through the crown edge.
         vec3 V = normalize(cameraPosition - vAtmoWorld);
         float back = pow(max(dot(-V, uSunDir), 0.0), 2.5);
         float sh = vfSunShadow();
         float rim = 1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition)));
-        float thin = clamp(rim * 1.2 + (1.0 - vFol.z) * 0.2 + vfLeaf * 0.3 + (vFol.w > 1.5 ? 0.35 : 0.0), 0.0, 1.0);
-        vec3 leafLight = vTint * uSunColor * vfCloudShade(vAtmoWorld) * vSite.y;
+        float thin = clamp(rim * 1.2 + (1.0 - vFol.z) * 0.2 + vfLeaf * 0.3 + (vFol.w > 1.5 ? 0.4 : 0.0), 0.0, 1.0);
+        vec3 leafLight = diffuseColor.rgb / max(vFol.z, 0.3) * uSunColor * vfCloudShade(vAtmoWorld) * vSite.y;
         outgoingLight += leafLight * back * thin * mix(0.28, 1.0, sh) * 0.75;
         outgoingLight += diffuseColor.rgb * uSunColor * 0.04;
       }
@@ -349,14 +414,16 @@ export function writeInstance(mesh: InstancedMesh, slot: number, d: TreeData, i:
   site?.setXY(slot, d.site[i * 2], d.site[i * 2 + 1])
 }
 
-function makeMaterials(lod: Lod, leafTex: Texture) {
-  const mat = new MeshLambertMaterial({ side: lod === 'near' ? DoubleSide : FrontSide })
+export function makeMaterials(lod: Lod | 'under', leafTex: Texture) {
+  const twoSided = lod === 'near' || lod === 'mid' || lod === 'under'
+  const mat = new MeshLambertMaterial({ side: twoSided ? DoubleSide : FrontSide })
   const opts = treePatch(`tree-${lod}`, leafTex)
   // colour and depth programs share the same uniform objects
-  opts.uniforms!.uLodMode.value = lod === 'near' ? 1 : 0
+  // shadow proxies stand in for the far AND mid trees, so only near trees cast detailed shadows
+  opts.uniforms!.uLodMode.value = lod === 'shadow' ? 4 : lod === 'under' ? 3 : lod === 'near' ? 2 : lod === 'mid' ? 1 : 0
   opts.uniforms!.uWindVis = U_WIND_VIS
   patchMaterial(mat, { ...opts, uniforms: { ...opts.uniforms, uCullBehind: { value: 1 } } })
-  const depth = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, side: lod === 'near' ? DoubleSide : FrontSide })
+  const depth = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, side: twoSided ? DoubleSide : FrontSide })
   patchDepthMaterial(depth, {
     ...opts,
     uniforms: { ...opts.uniforms, uCullBehind: { value: 0 } },
@@ -395,7 +462,9 @@ export class Forest {
   far: InstancedMesh[] = []
   proxies: InstancedMesh[] = []
   near: InstancedMesh[] = []
+  mid: InstancedMesh[] = []
   private nearIndex = new Map<number, InstancedMesh>()
+  private midIndex = new Map<number, InstancedMesh>()
   private cellSize = 32
   private gx0 = 0
   private gz0 = 0
@@ -405,12 +474,14 @@ export class Forest {
   private cellItems!: Int32Array
   private lastRebuild = new Vector3(1e9, 0, 0)
   nearCount = 0
+  midCount = 0
   readonly leafTex: Texture
 
   constructor(readonly d: TreeData, private terrain: Terrain, quality: { near: boolean }) {
-    this.leafTex = makeLeafClusterTexture()
+    this.leafTex = makeFoliageAtlas()
     const far = makeMaterials('far', this.leafTex)
     const near = makeMaterials('near', this.leafTex)
+    const mid = makeMaterials('mid', this.leafTex)
     const shadowDepth = makeMaterials('shadow', this.leafTex).depth
     const hidden = shadowOnlyMaterial()
 
@@ -431,7 +502,15 @@ export class Forest {
         this.far.push(fm)
         // near (dynamic)
         if (quality.near) {
-          const nm = this.instanced(buildTreeGeometry(SPECIES_LIST[si], 'near', seed), near.mat, 640, true)
+          const mm = this.instanced(buildTreeGeometry(SPECIES_LIST[si], 'mid', seed), mid.mat, 1500, true)
+          mm.customDepthMaterial = mid.depth
+          mm.count = 0
+          mm.castShadow = false
+          mm.receiveShadow = true
+          mm.name = `trees-mid-${SPECIES_LIST[si]}-${v}`
+          this.mid.push(mm)
+          this.midIndex.set(si * 16 + v, mm)
+          const nm = this.instanced(buildTreeGeometry(SPECIES_LIST[si], 'near', seed), near.mat, 320, true)
           nm.customDepthMaterial = near.depth
           nm.count = 0
           nm.castShadow = true
@@ -471,7 +550,7 @@ export class Forest {
         }
       }
     }
-    for (const m of [...this.far, ...this.proxies, ...this.near]) {
+    for (const m of [...this.far, ...this.proxies, ...this.mid, ...this.near]) {
       m.instanceMatrix.needsUpdate = true
       this.group.add(m)
     }
@@ -531,36 +610,53 @@ export class Forest {
     }
   }
 
-  /** Refill the near set around the view position. */
+  /** Refill the near and mid sets around the view position. */
   update(view: Vector3) {
     if (!this.near.length) return
     const ground = this.terrain.heightAt(view.x, view.z)
     const high = view.y - ground > 320
+    const all = [...this.near, ...this.mid]
     if (high) {
-      if (this.nearCount) {
-        for (const m of this.near) m.count = 0
-        this.nearCount = 0
+      if (this.nearCount || this.midCount) {
+        for (const m of all) m.count = 0
+        this.nearCount = this.midCount = 0
       }
       this.lastRebuild.set(1e9, 0, 0)
       return
     }
-    const dx = view.x - this.lastRebuild.x, dz = view.z - this.lastRebuild.z
-    if (dx * dx + dz * dz < 9) return
+    const dx = view.x - this.lastRebuild.x, dz = view.z - this.lastRebuild.z, dy = view.y - this.lastRebuild.y
+    if (dx * dx + dz * dz + dy * dy < 16) return
     this.lastRebuild.copy(view)
-    for (const m of this.near) m.count = 0
+    for (const m of all) m.count = 0
     const d = this.d
-    let total = 0
-    this.forEachNear(view.x, view.z, U.uLodRange.value.y + 8, (i) => {
-      const m = this.nearIndex.get(d.species[i] * 16 + d.variant[i])
-      if (!m || m.count >= m.instanceMatrix.count) return
-      writeInstance(m, m.count++, d, i)
-      total++
+    const L = U.uLodRange.value
+    const nearMax = L.y + 4, midMin = L.x - 14, midMax = L.w + 6
+    let nn = 0, mn = 0
+    this.forEachNear(view.x, view.z, midMax, (i) => {
+      const ex = d.x[i] - view.x, ey = d.y[i] - view.y, ez = d.z[i] - view.z
+      const dist = Math.sqrt(ex * ex + ey * ey + ez * ez)
+      const key = d.species[i] * 16 + d.variant[i]
+      if (dist < nearMax) {
+        const m = this.nearIndex.get(key)
+        if (m && m.count < m.instanceMatrix.count) {
+          writeInstance(m, m.count++, d, i)
+          nn++
+        }
+      }
+      if (dist > midMin && dist < midMax) {
+        const m = this.midIndex.get(key)
+        if (m && m.count < m.instanceMatrix.count) {
+          writeInstance(m, m.count++, d, i)
+          mn++
+        }
+      }
     })
-    for (const m of this.near) {
+    for (const m of all) {
       m.instanceMatrix.needsUpdate = true
       for (const n of ['aTint', 'aSeed', 'aSite']) (m.geometry.getAttribute(n) as InstancedBufferAttribute).needsUpdate = true
     }
-    this.nearCount = total
+    this.nearCount = nn
+    this.midCount = mn
   }
 }
 

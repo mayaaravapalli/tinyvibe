@@ -156,7 +156,7 @@ export class Leaves {
   }
 
   /** a leaf lets go of a particular tree */
-  dropFrom(tree: number, push: Vector3 | null, color?: Color) {
+  dropFrom(tree: number, push: Vector3 | null, color?: Color, size = 0.11) {
     const d = this.forest.d
     const r = this.rnd
     if (d.hue[tree] === 3) return // conifers keep their needles
@@ -170,7 +170,7 @@ export class Leaves {
     if (color) this.col.copy(color)
     // individual leaves are a touch brighter than the crown's shadowed mass
     this.col.multiplyScalar(1.15 + r() * 0.2)
-    this.spawn(x, y, z, push ? push.x : 0, push ? push.y : 0.3, push ? push.z : 0, this.col)
+    this.spawn(x, y, z, push ? push.x : 0, push ? push.y : 0.3, push ? push.z : 0, this.col, size)
   }
 
   /** ground height including the road surface */
@@ -350,16 +350,16 @@ export class Leaves {
         const t = Math.floor(r() * d.count)
         if (Math.abs(d.x[t] - 40) < 700 && Math.abs(d.z[t] + 100) < 700) this.dropFrom(t, null)
       } else {
-        this.ambientTimer = 0.35 + r() * 0.5
-        // a tree near the road ahead lets one go
+        this.ambientTimer = 0.18 + r() * 0.32
+        // a tree beside the road ahead lets one go: they drift across the windshield view
         const c = this.car
-        const ahead = 14 + r() * 60
+        const ahead = 8 + r() * 42
         const px = view.x + c.fwd.x * ahead, pz = view.z + c.fwd.z * ahead
         let pick = -1
-        this.forest.forEachNear(px, pz, 16, (i) => {
+        this.forest.forEachNear(px, pz, 14, (i) => {
           if (pick < 0 || r() < 0.3) pick = i
         })
-        if (pick >= 0) this.dropFrom(pick, null)
+        if (pick >= 0) this.dropFrom(pick, null, undefined, 0.13 + r() * 0.05)
       }
     }
     // now and then a little eddy chases a handful of leaves across the road ahead

@@ -1,4 +1,7 @@
 import { BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Vector3 } from 'three'
+import { TILE, tileUv } from '../render/leafTexture'
+import { growTree, speciesParams } from './branchTree'
+import { Builder } from './geoBuilder'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { mulberry32, Simplex2 } from '../core/noise'
 
@@ -27,47 +30,7 @@ export const SPECIES: Record<SpeciesId, SpeciesDef> = {
   pine: { id: 'pine', conifer: true, height: 24, bark: '#433528' },
 }
 
-export type Lod = 'near' | 'far' | 'shadow' | 'lump'
-
-class Builder {
-  pos: number[] = []
-  nor: number[] = []
-  fol: number[] = []
-  bark: number[] = []
-  uv: number[] = []
-  idx: number[] = []
-  add(geo: BufferGeometry, fol: (i: number, p: Vector3, n: Vector3) => [number, number, number, number], barkCol: Color) {
-    const base = this.pos.length / 3
-    const p = geo.getAttribute('position')
-    const n = geo.getAttribute('normal')
-    const P = new Vector3()
-    const Nn = new Vector3()
-    for (let i = 0; i < p.count; i++) {
-      P.fromBufferAttribute(p, i)
-      Nn.fromBufferAttribute(n, i)
-      this.pos.push(P.x, P.y, P.z)
-      this.nor.push(Nn.x, Nn.y, Nn.z)
-      this.fol.push(...fol(i, P, Nn))
-      this.bark.push(barkCol.r, barkCol.g, barkCol.b)
-      this.uv.push(0, 0)
-    }
-    const index = geo.getIndex()
-    if (index) for (let i = 0; i < index.count; i++) this.idx.push(base + index.getX(i))
-    else for (let i = 0; i < p.count; i++) this.idx.push(base + i)
-  }
-  build(): BufferGeometry {
-    const g = new BufferGeometry()
-    g.setAttribute('position', new BufferAttribute(new Float32Array(this.pos), 3))
-    g.setAttribute('normal', new BufferAttribute(new Float32Array(this.nor), 3))
-    g.setAttribute('aFol', new BufferAttribute(new Float32Array(this.fol), 4))
-    g.setAttribute('aBark', new BufferAttribute(new Float32Array(this.bark), 3))
-    g.setAttribute('uv', new BufferAttribute(new Float32Array(this.uv), 2))
-    g.setIndex(this.idx)
-    g.computeBoundingSphere()
-    g.computeBoundingBox()
-    return g
-  }
-}
+export type Lod = 'near' | 'mid' | 'far' | 'shadow' | 'lump'
 
 const noise = new Simplex2(4242)
 
@@ -199,64 +162,6 @@ function barkLimb(b: Builder, geo: BufferGeometry, height: number, barkCol: Colo
   b.add(geo, (_i, P) => [Math.max(0, P.y / height), r, 0.55 + 0.45 * Math.min(1, P.y / (height * 0.5)), 0], barkCol)
 }
 
-/**
- * Leaf cards scattered over a clump's surface. Shading normals follow the crown
- * envelope so the cards light like one soft volume; their faces are randomly
- * tilted so some always catch the eye at the silhouette. aFol.w = 2 marks cards.
- */
-function cards(b: Builder, center: Vector3, radius: Vector3, crown: Crown, height: number, count: number, size: number, rnd: () => number) {
-  const golden = Math.PI * (3 - Math.sqrt(5))
-  const cr = rnd()
-  const dir = new Vector3()
-  const cn = new Vector3()
-  const t1 = new Vector3()
-  const t2 = new Vector3()
-  const p = new Vector3()
-  const rv = new Vector3()
-  for (let k = 0; k < count; k++) {
-    const y = 1 - ((k + 0.5) / count) * 1.75
-    const r = Math.sqrt(Math.max(0, 1 - y * y))
-    const a = k * golden + rnd() * 0.5
-    dir.set(Math.cos(a) * r, y, Math.sin(a) * r).normalize()
-    const out = 0.9 + 0.25 * rnd()
-    p.set(center.x + dir.x * radius.x * out, center.y + dir.y * radius.y * out, center.z + dir.z * radius.z * out)
-    rv.set(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).multiplyScalar(2.2)
-    cn.copy(dir).add(rv).normalize()
-    t1.set(0, 1, 0)
-    if (Math.abs(cn.y) > 0.9) t1.set(1, 0, 0)
-    t1.cross(cn).normalize()
-    t2.crossVectors(cn, t1).normalize()
-    const rot = rnd() * Math.PI * 2
-    const c0 = Math.cos(rot), s0 = Math.sin(rot)
-    const u = t1.clone().multiplyScalar(c0).addScaledVector(t2, s0)
-    const v = t2.clone().multiplyScalar(c0).addScaledVector(t1, -s0)
-    const sz = size * (0.8 + 0.45 * rnd())
-    const base = b.pos.length / 3
-    const corners: [number, number][] = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]]
-    for (const [cu, cv] of corners) {
-      const x = p.x + (u.x * cu + v.x * cv) * sz
-      const yy = p.y + (u.y * cu + v.y * cv) * sz
-      const z = p.z + (u.z * cu + v.z * cv) * sz
-      b.pos.push(x, yy, z)
-      // crown-envelope normal for volumetric shading
-      const ex = (x - crown.c.x) / (crown.r.x * crown.r.x)
-      const ey = (yy - crown.c.y) / (crown.r.y * crown.r.y)
-      const ez = (z - crown.c.z) / (crown.r.z * crown.r.z)
-      const nx = dir.x * 0.5 + ex * 0.5 * crown.r.x
-      const ny = dir.y * 0.5 + ey * 0.5 * crown.r.y
-      const nz = dir.z * 0.5 + ez * 0.5 * crown.r.z
-      const nl = Math.hypot(nx, ny, nz) || 1
-      b.nor.push(nx / nl, ny / nl, nz / nl)
-      const ry = (yy - crown.c.y) / crown.r.y
-      const ao = Math.min(1, Math.max(0.3, 0.62 + 0.38 * ry + 0.12 * out))
-      b.fol.push(Math.max(0, yy / height), cr, ao, 2)
-      b.bark.push(0, 0, 0)
-      b.uv.push((cu + 0.5) * 0.5, cv + 0.5)
-    }
-    b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
-  }
-}
-
 /** Deciduous crown archetypes. */
 function deciduous(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   const rnd = mulberry32(seed * 7919 + 13)
@@ -332,16 +237,7 @@ function deciduous(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   for (let i = 0; i < centers.length; i++) {
     const s = clumpR * (0.85 + rnd() * 0.35) * (lod === 'shadow' || lod === 'lump' ? 2.1 : lod === 'far' ? 1.36 : 1.0)
     const rad = new Vector3(crown.r.x * s, crown.r.y * s * 0.8, crown.r.z * s)
-    if (lod === 'near') {
-      // a dim inner core keeps the crown from looking hollow; leaf cards carry the surface
-      const core = rad.clone().multiplyScalar(0.72)
-      const before = b.fol.length
-      clump(b, centers[i], core, detail, crown, H, seed * 13 + i * 3.7, rnd, bump)
-      for (let k = before + 2; k < b.fol.length; k += 4) b.fol[k] *= 0.62
-      cards(b, centers[i], rad, crown, H, 46, H * 0.11, rnd)
-    } else {
-      clump(b, centers[i], rad, detail, crown, H, seed * 13 + i * 3.7, rnd, bump)
-    }
+    clump(b, centers[i], rad, detail, crown, H, seed * 13 + i * 3.7, rnd, bump)
   }
   return b.build()
 }
@@ -377,7 +273,8 @@ function boughs(b: Builder, y0: number, R: number, count: number, H: number, dro
         b.nor.push(n.x, n.y, n.z)
         b.fol.push(Math.max(0, p.y / H), cr, Math.min(1, ao * (0.75 + 0.35 * cu)), 2)
         b.bark.push(0, 0, 0)
-        b.uv.push(0.5 + cu * 0.5, cv + 0.5)
+        const [uu, vv] = tileUv(TILE.needles, cu, cv + 0.5)
+        b.uv.push(uu, vv)
       }
       b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
     }
@@ -391,8 +288,8 @@ function spruce(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   const H = def.height
   const barkCol = new Color(def.bark)
   const sides = lod === 'near' ? 6 : 4
-  if (lod !== 'shadow' && lod !== 'lump') barkLimb(b, limb(new Vector3(0, -0.6, 0), new Vector3(0, H * 0.92, 0), H * 0.022, H * 0.004, sides, 1, null), H, barkCol, rnd)
-  const tiers = lod === 'lump' ? 1 : lod === 'shadow' ? 2 : lod === 'far' ? 3 : 9
+  if (lod !== 'shadow' && lod !== 'lump') barkLimb(b, limb(new Vector3(0, -0.6, 0), new Vector3(0, H * 0.92, 0), H * 0.024, H * 0.004, sides, lod === 'near' ? 3 : 1, null), H, barkCol, rnd)
+  const tiers = lod === 'lump' ? 1 : lod === 'shadow' ? 2 : lod === 'far' ? 3 : lod === 'mid' ? 6 : 10
   const base = H * 0.12
   const crown: Crown = { c: new Vector3(0, H * 0.48, 0), r: new Vector3(H * 0.2, H * 0.5, H * 0.2) }
   const rim = lod === 'near' ? 11 : 8
@@ -432,8 +329,9 @@ function spruce(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
     g.setAttribute('normal', new BufferAttribute(new Float32Array(nor), 3))
     g.setIndex(idx)
     const cr = rnd()
-    const nearDim = lod === 'near' ? 0.55 : 1
+    const nearDim = lod === 'near' || lod === 'mid' ? 0.7 : 1
     if (lod === 'near') g.scale(0.62, 1, 0.62)
+    if (lod === 'mid') g.scale(0.75, 1, 0.75)
     b.add(
       g,
       (i, P) => {
@@ -443,7 +341,8 @@ function spruce(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
       },
       new Color(0, 0, 0),
     )
-    if (lod === 'near') boughs(b, y0 + tierH * 0.35, R * 1.05, 9, H, R * 0.28, 0.5 + 0.5 * f, rnd)
+    if (lod === 'near') boughs(b, y0 + tierH * 0.35, R * 1.05, 11, H, R * 0.28, 0.5 + 0.5 * f, rnd)
+    if (lod === 'mid') boughs(b, y0 + tierH * 0.35, R * 1.1, 6, H, R * 0.28, 0.5 + 0.5 * f, rnd)
   }
   void crown
   return b.build()
@@ -459,7 +358,7 @@ function pine(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   const top = new Vector3((rnd() - 0.5) * 1.2, H * 0.93, (rnd() - 0.5) * 1.2)
   if (lod !== 'shadow' && lod !== 'lump') barkLimb(b, limb(new Vector3(0, -0.6, 0), top, H * 0.022, H * 0.006, sides, lod === 'near' ? 3 : 1, null), H, barkCol, rnd)
   const crown: Crown = { c: new Vector3(0, H * 0.66, 0), r: new Vector3(H * 0.22, H * 0.34, H * 0.22) }
-  const pads = lod === 'shadow' || lod === 'lump' ? 2 : lod === 'far' ? 3 : 9
+  const pads = lod === 'shadow' || lod === 'lump' ? 2 : lod === 'far' ? 3 : lod === 'mid' ? 6 : 10
   for (let i = 0; i < pads; i++) {
     const f = i / pads
     const y = H * (0.42 + 0.5 * f)
@@ -471,13 +370,13 @@ function pine(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
       barkLimb(b, limb(new Vector3(top.x * f, y - 0.4, top.z * f), c, H * 0.006, H * 0.002, 3, 1, null), H, barkCol, rnd)
     }
     const padR = new Vector3(rr * 1.25, rr * 0.42, rr * 1.15)
-    if (lod === 'near') {
+    if (lod === 'near' || lod === 'mid') {
       const before = b.fol.length
-      clump(b, c, padR.clone().multiplyScalar(0.7), 1, crown, H, seed * 31 + i, rnd, 0.26, 0.4)
-      for (let k = before + 2; k < b.fol.length; k += 4) b.fol[k] *= 0.6
+      clump(b, c, padR.clone().multiplyScalar(lod === 'near' ? 0.45 : 0.6), lod === 'near' ? 1 : 0, crown, H, seed * 31 + i, rnd, 0.26, 0.4)
+      for (let k = before + 2; k < b.fol.length; k += 4) b.fol[k] *= 0.8
       // soft long-needle sprays fanning out of each pad
       const sub = new Builder()
-      boughs(sub, 0, rr * 1.3, 7, H, rr * 0.12, 0.85, rnd)
+      boughs(sub, 0, rr * 1.5, lod === 'near' ? 13 : 8, H, rr * 0.16, 0.9, rnd)
       for (let k = 0; k < sub.pos.length; k += 3) {
         b.pos.push(sub.pos[k] + c.x, sub.pos[k + 1] + c.y, sub.pos[k + 2] + c.z)
         b.nor.push(sub.nor[k], sub.nor[k + 1], sub.nor[k + 2])
@@ -496,6 +395,10 @@ function pine(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
 
 export function buildTreeGeometry(id: SpeciesId, lod: Lod, seed: number): BufferGeometry {
   const def = SPECIES[id]
+  if (!def.conifer && (lod === 'near' || lod === 'mid')) {
+    const rnd = mulberry32(seed * 7 + 3)
+    return growTree(speciesParams(id, lod, def.bark, def.height, rnd), seed).build()
+  }
   if (id === 'spruce') return spruce(def, lod, seed)
   if (id === 'pine') return pine(def, lod, seed)
   return deciduous(def, lod, seed)
