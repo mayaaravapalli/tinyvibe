@@ -415,38 +415,41 @@ export function makeFoliageAtlas(tile = 512): Texture {
     }
   })
 
-  // goldenrod gone to seed: a stalk whose top splits into arching sprays of fluff
+  // goldenrod: two or three stalks, each topped with a dense, fluffy, nodding plume
   at(TILE.goldenrod, () => {
     g.lineCap = 'round'
-    const baseX = tile * 0.5
-    const topY = tile * 0.42
-    g.strokeStyle = col(120, 60, 255)
-    g.lineWidth = tile * 0.011
-    g.beginPath()
-    g.moveTo(baseX, tile)
-    g.quadraticCurveTo(baseX - tile * 0.02, tile * 0.7, baseX + tile * 0.02, topY)
-    g.stroke()
-    const sprays = 7
-    for (let k = 0; k < sprays; k++) {
-      const t = k / (sprays - 1)
-      const sx = baseX + tile * 0.02, sy = topY + (1 - t) * tile * 0.12
-      const side = k % 2 ? 1 : -1
-      const len = tile * (0.16 + 0.2 * Math.sin(Math.PI * (0.25 + 0.6 * t)))
-      const ex = sx + side * len * 0.75, ey = sy - len * 0.55
-      g.strokeStyle = col(120, 60, 255)
-      g.lineWidth = tile * 0.005
+    for (let st = 0; st < 3; st++) {
+      const bx = tile * (0.36 + st * 0.14 + (rnd() - 0.5) * 0.06)
+      const topY = tile * (0.12 + rnd() * 0.12)
+      const lean = (rnd() - 0.5) * tile * 0.12
+      g.strokeStyle = col(110, 50, 255)
+      g.lineWidth = tile * 0.012
       g.beginPath()
-      g.moveTo(sx, sy)
-      g.quadraticCurveTo(sx + side * len * 0.2, ey - len * 0.25, ex, ey + len * 0.1)
+      g.moveTo(bx, tile)
+      g.quadraticCurveTo(bx, tile * 0.6, bx + lean, topY + tile * 0.25)
       g.stroke()
-      // fluff along the upper side of each arching spray
-      for (let i = 0; i < 70; i++) {
-        const u = Math.pow(rnd(), 0.8)
-        const x = sx + (ex - sx) * u + (rnd() - 0.5) * tile * 0.025
-        const y = sy + (ey - sy) * u - Math.sin(u * Math.PI) * len * 0.22 - rnd() * tile * 0.03
-        g.fillStyle = col(150 + rnd() * 105, rnd() * 255, 0)
+      // a few narrow leaves up the stalk
+      for (let k = 0; k < 4; k++) {
+        const y = tile * (0.85 - k * 0.12)
+        const s = k % 2 ? 1 : -1
+        g.strokeStyle = col(120, 60 + rnd() * 80, 255)
+        g.lineWidth = tile * 0.008
         g.beginPath()
-        g.arc(x, y, tile * (0.004 + rnd() * 0.007), 0, Math.PI * 2)
+        g.moveTo(bx + lean * (1 - y / tile), y)
+        g.lineTo(bx + lean * (1 - y / tile) + s * tile * 0.07, y - tile * 0.05)
+        g.stroke()
+      }
+      // the plume: a nodding, pyramidal cloud of tiny florets
+      const cx = bx + lean, cy = topY + tile * 0.14
+      const H = tile * 0.26, W = tile * 0.13
+      for (let i = 0; i < 520; i++) {
+        const t = Math.pow(rnd(), 0.8)
+        const y = cy - H * 0.5 + t * H
+        const w = W * (0.35 + 0.65 * t)
+        const x = cx + (rnd() - 0.5) * 2 * w + Math.sin(t * 3) * tile * 0.02
+        g.fillStyle = col(165 + rnd() * 90, rnd() * 255, 0)
+        g.beginPath()
+        g.arc(x, y - (1 - t) * (x - cx) * 0.25, tile * (0.005 + rnd() * 0.007), 0, Math.PI * 2)
         g.fill()
       }
     }

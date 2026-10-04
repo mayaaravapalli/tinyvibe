@@ -38,6 +38,7 @@ import { WindField } from './world/wind'
 import { Leaves, WindshieldLeaf } from './world/leaves'
 import { Birds, Smoke } from './world/ambient'
 import { buildWater } from './world/water'
+import { Meadow } from './world/meadow'
 
 export interface AppOptions {
   canvas: HTMLCanvasElement
@@ -67,6 +68,7 @@ export class App {
   bridge!: BridgeBuild
   buildings!: BuildingsBuild
   ground!: GroundDetail
+  meadow!: Meadow
   leaves!: Leaves
   windshield!: WindshieldLeaf
   smoke!: Smoke
@@ -216,6 +218,8 @@ export class App {
     const kit = new UndergrowthKit(underMats.mat, underMats.depth)
     this.ground = this.time('ground', () => new GroundDetail(this.terrain, trees, atlas, q.grassDensity, kit, tm.sunVisAt))
     this.scene.add(this.ground.group)
+    this.meadow = this.time('meadow', () => new Meadow(tm.ground, this.forest.leafTex, q.grassDensity))
+    this.scene.add(this.meadow.group)
     this.leaves = new Leaves(this.terrain, this.forest, this.wind, atlas, q.leaves)
     this.scene.add(this.leaves.mesh)
     this.scene.add(this.camera)
@@ -618,6 +622,7 @@ export class App {
     this.wind.update(dt)
     this.forest.update(this.camera.position)
     this.ground.update(this.camera.position, above)
+    this.meadow.update(above)
     this.updateLife(dt, above)
     this.updateShadowFit()
     const inside = this.bridge.depthInside(this.camera.position)

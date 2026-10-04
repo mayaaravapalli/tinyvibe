@@ -13,6 +13,7 @@ import { smoothstep } from '../core/noise'
 import { patchMaterial } from '../render/shared'
 import { FAR, NEAR, NEAR_STEP, type Terrain } from './terrain'
 import { TREE_RECT, forestDensity, treeRegionWeight } from './forest'
+import { GLSL_GROUND, GLSL_MEADOW_TONE, GROUND_U } from './meadow'
 
 /** Warped axis: uniform 5 m inside the detailed region, then growing towards the horizon. */
 function axisCoords(): Float32Array {
@@ -61,12 +62,23 @@ class CoarseHeights {
   }
 }
 
+/** Ground data on the detailed 5 m grid, for shaders that place things on the land. */
+export interface GroundGrid {
+  n: number
+  min: number
+  step: number
+  height: Float32Array
+  /** rgba8: r = open land (grass density), g = field kind, b = road distance / 25.5 m, a = wet */
+  meadow: Uint8Array
+}
+
 export interface TerrainBuild {
   mesh: Group
   coarse: CoarseHeights
   /** baked sun visibility (0..1) on the detailed grid */
   sunVisAt: (x: number, z: number) => number
   groundAt: (x: number, z: number) => number
+  ground: GroundGrid
 }
 
 export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
@@ -78,6 +90,7 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
   const nor = new Float32Array(N * N * 3)
   const mask = new Float32Array(N * N * 4)
   const hs = new Float32Array(N * N)
+  const meadow = new Uint8Array(gridN * gridN * 4)
 
   for (let j = 0; j < N; j++) {
     const z = A[j]
@@ -124,6 +137,15 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
       const ck = T.clearingKind(x, z)
       let wet = 0
       if (inCore && T.streamNearest(x, z, 14, hit)) wet = 1 - smoothstep(2.5, 10, hit.d)
+      const gi = i - innerStart, gj = j - innerStart
+      if (gi >= 0 && gj >= 0 && gi < gridN && gj < gridN) {
+        const o = (gj * gridN + gi) * 4
+        const rd = T.roadNearest(x, z, 25.5, hit) ? hit.d : 25.5
+        meadow[o] = Math.round(255 * Math.max(0, Math.min(1, 1 - forest)) * (1 - wet))
+        meadow[o + 1] = Math.round(255 * (ck ? kind[ck] : 0))
+        meadow[o + 2] = Math.round((rd / 25.5) * 255)
+        meadow[o + 3] = Math.round(255 * wet)
+      }
 
       // baked sun visibility
       let maxTan = -1
@@ -200,6 +222,7 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     uniforms: {
       uTreeRect: { value: new Vector4(TREE_RECT.minX, TREE_RECT.minZ, TREE_RECT.maxX, TREE_RECT.maxZ) },
       uTreeFeather: { value: TREE_RECT.feather },
+      ...GROUND_U,
     },
     vertexPars: /* glsl */ `
       attribute vec4 aMask;
@@ -220,6 +243,10 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
       uniform float uTreeFeather;
       uniform sampler2D uWindTex;
       uniform vec4 uWindRect;
+      uniform vec2 uAmbientWind;
+      uniform float uGrassOn;
+      ${GLSL_GROUND}
+      ${GLSL_MEADOW_TONE}
       vec3 srgb(float r, float g, float b) { return pow(vec3(r, g, b), vec3(2.2)); }
 
       float vfTreeRegion(vec2 p) {
@@ -310,21 +337,33 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
 
         float m1 = vfFbm(wp.xz * 0.045);
         float m2 = vfNoise(wp.xz * 0.7);
-        float m3 = vfFbm(wp.xz * 0.012 + 5.0);
-        vec3 meadow = mix(srgb(0.66, 0.58, 0.30), srgb(0.76, 0.64, 0.36), m1);
-        meadow = mix(meadow, srgb(0.50, 0.53, 0.26), smoothstep(0.45, 0.72, m3) * 0.6);
-        meadow = mix(meadow, srgb(0.62, 0.42, 0.26), smoothstep(0.62, 0.8, vfFbm(wp.xz * 0.03 + 9.0)) * 0.5);
-        meadow *= 0.88 + 0.22 * m2;
+        // open land wears the same palette as the grass blades growing on it
+        float inGrid = step(abs(wp.x), -uGround.x - 10.0) * step(abs(wp.z), -uGround.x - 10.0);
+        float roadD = mix(25.5, vfMeadowAt(wp.xz).b * 25.5, inGrid);
+        vec3 openC = vfMeadowTone(wp.xz, ftype, roadD, 0.5);
+        // texture of the field itself: clumps, flattened streaks, darker hollows (fades when sub-pixel)
+        float cl = vfNoise(wp.xz * vec2(1.7, 1.2)) * 0.55 + vfNoise(wp.xz * 4.3 + 2.0) * 0.45;
+        float clF = 1.0 - smoothstep(0.25, 0.9, length(fwidth(wp.xz * 1.7)));
+        // the eye reads a grass field as its shaded body, not its lit tips
+        openC *= mix(0.82, 0.62 + 0.4 * cl, clF);
+        // larger mottling that still reads from a hundred metres: trampled, flattened and lusher patches
+        openC *= 0.88 + 0.16 * vfNoise(wp.xz * 0.21 + 4.0) + 0.1 * (vfNoise(wp.xz * 0.06 + 9.0) - 0.5);
+        float mownT = max(1.0 - smoothstep(8.5, 11.0, roadD), smoothstep(0.3, 0.45, ftype) * (1.0 - smoothstep(0.6, 0.75, ftype)));
+        // the hay field keeps its mowing stripes
         float sArg = dot(wp.xz, vec2(0.8, 0.6)) * 0.42;
         float sFade = 1.0 - smoothstep(0.25, 0.9, fwidth(sArg));
         float stripe = sin(sArg) * sFade;
-        vec3 hay = mix(srgb(0.78, 0.70, 0.42), srgb(0.62, 0.60, 0.32), smoothstep(-0.25, 0.25, stripe) * sFade + 0.5 * (1.0 - sFade));
-        hay *= 0.92 + 0.12 * m2;
-        vec3 lawn = mix(srgb(0.44, 0.47, 0.24), srgb(0.55, 0.53, 0.29), m1) * (0.92 + 0.12 * m2);
-        vec3 openC = mix(meadow, lawn, smoothstep(0.25, 0.5, ftype));
-        openC = mix(openC, hay, smoothstep(0.75, 0.95, ftype));
+        openC *= 1.0 + smoothstep(0.8, 0.95, ftype) * stripe * 0.1;
+        // slow waves of wind rolling across the tall grass, readable from far away
+        vec2 wdir = normalize(uAmbientWind + vec2(1e-4));
+        float wv = sin(dot(wp.xz, wdir) * 0.11 - uTime * 2.3 + vfNoise(wp.xz * 0.02) * 5.0);
+        openC *= 1.0 + (0.5 + 0.5 * wv) * length(uAmbientWind) * 0.32 * (1.0 - mownT);
+        // down among the stems, where blades are drawn, the ground is thatch and shade
+        float camD = distance(wp, cameraPosition);
+        float under = (1.0 - smoothstep(62.0, 90.0, camD)) * uGrassOn;
+        openC = mix(openC, openC * vec3(0.62, 0.56, 0.46), under * 0.75);
         // far-off fields read as warm stubble, never as water
-        float fo = smoothstep(1800.0, 3200.0, distance(wp, cameraPosition));
+        float fo = smoothstep(1800.0, 3200.0, camD);
         openC = mix(openC, srgb(0.55, 0.45, 0.28) * (0.85 + 0.2 * m1), fo * 0.8);
 
         vec3 floorC = mix(srgb(0.15, 0.11, 0.075), srgb(0.29, 0.18, 0.10), vfNoise(wp.xz * 0.9));
@@ -355,9 +394,6 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
         float nearD = 1.0 - smoothstep(20.0, 80.0, dCam);
         if (nearD > 0.0) {
           float gs = vfNoise(wp.xz * vec2(3.1, 9.0)) * 0.6 + vfNoise(wp.xz * vec2(7.3, 2.4) + 3.0) * 0.4;
-          float soil = smoothstep(0.62, 0.8, vfNoise(wp.xz * 1.1 + 9.0));
-          vec3 openNear = col * (0.72 + 0.45 * gs);
-          openNear = mix(openNear, srgb(0.30, 0.24, 0.16), soil * 0.35);
           // individual fallen leaves: a small rotated ellipse per 25 cm cell
           vec2 cellP = wp.xz * 4.0;
           vec2 cid = floor(cellP);
@@ -370,7 +406,7 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
           vec3 leafCol = lc > 0.8 ? srgb(0.70, 0.30, 0.08) : lc > 0.65 ? srgb(0.75, 0.52, 0.14) : lc > 0.5 ? srgb(0.52, 0.12, 0.08) : srgb(0.40, 0.26, 0.14);
           vec3 floorNear = mix(col * (0.8 + 0.3 * gs), leafCol, leafy * 0.8);
           float fm = smoothstep(0.25, 0.75, forest);
-          col = mix(col, mix(openNear, floorNear, fm), nearD * (1.0 - paint));
+          col = mix(col, floorNear, fm * nearD * (1.0 - paint));
         }
         diffuseColor.rgb = col;
       }
@@ -414,5 +450,6 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     const m = (ii: number, jj: number) => hs[jj * N + ii]
     return (m(i, j) * (1 - tx) + m(i + 1, j) * tx) * (1 - tz) + (m(i, j + 1) * (1 - tx) + m(i + 1, j + 1) * tx) * tz
   }
-  return { mesh, coarse, sunVisAt, groundAt }
+  const ground: GroundGrid = { n: gridN, min: -NEAR, step: NEAR_STEP, height: T.heights, meadow }
+  return { mesh, coarse, sunVisAt, groundAt, ground }
 }

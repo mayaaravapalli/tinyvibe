@@ -12,7 +12,7 @@ import {
   Vector3,
   type Texture,
 } from 'three'
-import { hash2, mulberry32, smoothstep } from '../core/noise'
+import { mulberry32, smoothstep } from '../core/noise'
 import { patchMaterial } from '../render/shared'
 import { forestDensity } from './forest'
 import type { Terrain } from './terrain'
@@ -27,45 +27,6 @@ import { UNDER_PALETTE, type UnderInstance, type UndergrowthKit } from './underg
  */
 
 const CHUNK = 60
-
-function bladeClump(): BufferGeometry {
-  // five curved blades, each a three-segment strip
-  const pos: number[] = []
-  const nor: number[] = []
-  const tip: number[] = []
-  const idx: number[] = []
-  const rnd = mulberry32(5)
-  for (let b = 0; b < 6; b++) {
-    const a = rnd() * Math.PI * 2
-    const ox = Math.cos(a) * 0.16 * rnd(), oz = Math.sin(a) * 0.16 * rnd()
-    const lean = 0.15 + rnd() * 0.3
-    const w = 0.03 + rnd() * 0.02
-    const h = 0.55 + rnd() * 0.45
-    const dx = Math.cos(a + 1.57), dz = Math.sin(a + 1.57)
-    const base = pos.length / 3
-    for (let k = 0; k <= 2; k++) {
-      const t = k / 2
-      const y = h * t
-      const off = lean * t * t
-      const ww = w * (1 - t * 0.85)
-      for (const side of [-1, 1]) {
-        pos.push(ox + Math.cos(a) * off + dx * ww * side, y, oz + Math.sin(a) * off + dz * ww * side)
-        nor.push(Math.cos(a) * 0.3, 1, Math.sin(a) * 0.3)
-        tip.push(t)
-      }
-    }
-    for (let k = 0; k < 2; k++) {
-      const i0 = base + k * 2
-      idx.push(i0, i0 + 1, i0 + 2, i0 + 1, i0 + 3, i0 + 2)
-    }
-  }
-  const g = new BufferGeometry()
-  g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3))
-  g.setAttribute('normal', new BufferAttribute(new Float32Array(nor), 3))
-  g.setAttribute('aTip', new BufferAttribute(new Float32Array(tip), 1))
-  g.setIndex(idx)
-  return g
-}
 
 function leafQuad(): BufferGeometry {
   const g = new BufferGeometry()
@@ -123,43 +84,6 @@ export class GroundDetail {
         }
       }
     }
-    const grassMat = patchMaterial(new MeshLambertMaterial({ side: DoubleSide }), {
-      key: 'grass',
-      cloudShadows: true,
-      vertexPars: /* glsl */ `
-        attribute vec4 aG;      // x, y, z, packed (rotation, scale)
-        attribute vec3 aGCol;
-        attribute float aTip;
-        uniform sampler2D uWindTex;
-        uniform vec4 uWindRect;
-        uniform vec2 uAmbientWind;
-        varying vec3 vGCol;
-        varying float vTipG;
-      `,
-      vertexWorld: /* glsl */ `
-        float rot = fract(aG.w) * 6.2831;
-        float sc = floor(aG.w) / 100.0;
-        float c = cos(rot), s = sin(rot);
-        vec3 lp = vec3(transformed.x * c - transformed.z * s, transformed.y, transformed.x * s + transformed.z * c) * sc;
-        vec3 wpos = aG.xyz + lp;
-        vec4 wind = texture2D(uWindTex, (aG.xz - uWindRect.xy) * uWindRect.zw);
-        vec2 bend = (wind.rg - 0.5) * 2.6 + uAmbientWind * (0.6 + 0.4 * sin(uTime * 1.7 + aG.x * 0.31 + aG.z * 0.27));
-        float t2 = aTip * aTip;
-        wpos.xz += bend * t2 * 0.45 * sc;
-        wpos.xz += vec2(sin(uTime * 3.1 + aG.x * 1.7), cos(uTime * 2.7 + aG.z * 1.3)) * 0.04 * t2 * (0.5 + wind.b);
-        wpos.y -= dot(bend, bend) * t2 * 0.06 * sc;
-        vfWorld = vec4(wpos, 1.0);
-        vGCol = aGCol;
-        vTipG = aTip;
-      `,
-      fragmentPars: /* glsl */ `
-        varying vec3 vGCol;
-        varying float vTipG;
-      `,
-      fragmentColor: /* glsl */ `
-        diffuseColor.rgb = vGCol * mix(0.55, 1.0, vTipG);
-      `,
-    })
     const leafMat = patchMaterial(new MeshLambertMaterial({ map: leafAtlas, alphaTest: 0.5, side: DoubleSide }), {
       key: 'litter',
       cloudShadows: true,
@@ -185,56 +109,23 @@ export class GroundDetail {
       fragmentColor: 'diffuseColor.rgb *= vLCol;',
     })
 
-    const blade = bladeClump()
     const leaf = leafQuad()
     const r = T.road
     const hit = { d: 0, s: 0, lat: 0 }
     const f = { x: 0, z: 0, tx: 0, tz: 0 }
     const L = r.length
     for (let c0 = 0; c0 < L; c0 += CHUNK) {
-      const gs: number[] = []
-      const gc: number[] = []
       const ls: number[] = []
       const lc: number[] = []
       const rnd = mulberry32(Math.floor(c0 * 13) + 7)
       const center = new Vector3()
       let n = 0
-      // grass: thick on the mown verge, thinning into the fields and the woods
-      const bands: [number, number, number][] = [
-        [5.9, 10, 10],
-        [10, 20, 2.0],
-        [20, 32, 0.5],
-      ]
-      for (const [l0, l1, per] of bands) {
-        const count = Math.floor(CHUNK * 2 * (l1 - l0) * per * density)
-        for (let k = 0; k < count; k++) {
-          const s = c0 + rnd() * CHUNK
-          let db = Math.abs(s - T.bridge.s)
-          db = Math.min(db, L - db)
-          if (db < 20) continue
-          const side = rnd() > 0.5 ? 1 : -1
-          const lat = side * (l0 + rnd() * (l1 - l0))
-          const forest = this.verge(s, lat)
-          if (rnd() < forest * (l0 < 9 ? 0.85 : 0.97)) continue
-          r.sample(s, f)
-          const x = f.x - f.tz * lat, z = f.z + f.tx * lat
-          if (l0 < 9 && T.roadNearest(x, z, 5.8, hit)) continue
-          const y = T.heightAt(x, z)
-          const mown = Math.abs(lat) < 9 ? 0.5 : 1
-          const sc = (0.5 + rnd() * 0.5) * mown * (0.75 + 0.25 * (1 - forest))
-          gs.push(x, y - 0.03, z, Math.floor(sc * 100) + rnd() * 0.999)
-          // golden straw with some late green and russet
-          const g1 = hash2(Math.floor(x * 0.25), Math.floor(z * 0.25), 3)
-          const green = smoothstep(0.55, 0.9, g1) * 0.7
-          const tone = 0.85 + rnd() * 0.3
-          // tawny straw, russet, and the last late-season green
-          const rus = smoothstep(0.7, 0.95, hash2(Math.floor(x * 0.6), Math.floor(z * 0.6), 9)) * 0.6
-          gc.push((0.5 - 0.22 * green + 0.06 * rus) * tone, (0.4 + 0.04 * green - 0.1 * rus) * tone, (0.17 - 0.04 * green - 0.04 * rus) * tone)
-          center.x += x
-          center.y += y
-          center.z += z
-          n++
-        }
+      // (grass itself lives in meadow.ts and follows the camera across every open field)
+      {
+        const f0 = { x: 0, z: 0, tx: 0, tz: 0 }
+        r.sample(c0 + CHUNK / 2, f0)
+        center.set(f0.x, T.roadYAt(c0 + CHUNK / 2), f0.z)
+        n = 1
       }
       // fallen leaves drifting on the verges, collecting against the edges
       for (let k = 0; k < CHUNK * 9 * density; k++) {
@@ -320,25 +211,9 @@ export class GroundDetail {
         place('fern', 6.3, 24, 700, (fd) => smoothstep(0.15, 0.5, fd), 0.8, 1.5, UNDER_PALETTE.fern)
         place('shrub', 6.6, 20, 90, (fd) => smoothstep(0.1, 0.35, fd) * (1 - smoothstep(0.8, 0.98, fd)), 0.7, 1.3, UNDER_PALETTE.shrub)
         place('sumac', 7, 18, 40, (fd) => smoothstep(0.02, 0.15, fd) * (1 - smoothstep(0.35, 0.65, fd)), 0.8, 1.25, UNDER_PALETTE.sumac)
-        place('goldenrod', 7, 30, 240, (fd) => 1 - smoothstep(0.05, 0.3, fd), 0.6, 1.05, UNDER_PALETTE.goldenrod)
-        place('aster', 6.5, 24, 150, (fd) => 1 - smoothstep(0.05, 0.3, fd), 0.7, 1.2, UNDER_PALETTE.aster)
       }
       if (!n) continue
-      center.multiplyScalar(1 / n)
       const meshes: Mesh[] = []
-      {
-        const geo = new InstancedBufferGeometry()
-        geo.index = blade.index
-        for (const name of ['position', 'normal', 'aTip']) geo.setAttribute(name, blade.getAttribute(name))
-        geo.setAttribute('aG', new InstancedBufferAttribute(new Float32Array(gs), 4))
-        geo.setAttribute('aGCol', new InstancedBufferAttribute(new Float32Array(gc), 3))
-        geo.instanceCount = gs.length / 4
-        geo.boundingSphere = new Sphere(center.clone(), CHUNK)
-        const m = new Mesh(geo, grassMat)
-        m.receiveShadow = true
-        m.frustumCulled = true
-        meshes.push(m)
-      }
       if (ls.length) {
         const geo = new InstancedBufferGeometry()
         geo.index = leaf.index

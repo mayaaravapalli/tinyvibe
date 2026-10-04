@@ -103,11 +103,21 @@ export function buildRoadMesh(T: Terrain): Mesh {
         vec3 col = asph;
         col = mix(col, srgb(0.86, 0.85, 0.80), edge * vis);
         col = mix(col, srgb(0.86, 0.66, 0.18), clamp(yel, 0.0, 1.0) * vis);
-        // gravel shoulder blending into the verge
+        // gravel shoulder: grey-brown stones, washed sand, then a ragged edge of grass
         float shoulder = smoothstep(3.3, 3.5, au);
-        vec3 grav = mix(srgb(0.46, 0.42, 0.36), srgb(0.36, 0.31, 0.25), vfNoise(wp * 4.0));
-        grav = mix(grav, srgb(0.40, 0.36, 0.20), smoothstep(4.2, 5.4, au));
+        // fine crushed gravel: a grainy, low-contrast mix of greys and tans (fades when tiny on screen)
+        float pf = 1.0 - smoothstep(0.5, 2.0, length(fwidth(wp)) * 40.0);
+        float g1 = vfNoise(wp * 34.0), g2 = vfNoise(wp * 71.0 + 5.0);
+        vec3 grav = mix(srgb(0.46, 0.43, 0.38), srgb(0.53, 0.49, 0.42), vfNoise(wp * 1.3));
+        grav *= mix(1.0, 0.86 + 0.18 * g1 + 0.12 * (g2 - 0.5), pf);
+        grav = mix(grav, srgb(0.50, 0.43, 0.32), smoothstep(0.55, 0.8, vfNoise(wp * 0.7)) * 0.4);
+        // wheel-flung sand drifts at the asphalt edge
+        grav = mix(grav, srgb(0.56, 0.50, 0.40), (1.0 - smoothstep(3.4, 4.0, au)) * 0.5);
         col = mix(col, grav, shoulder);
+        float ragged = au + (vfNoise(wp * 1.6) - 0.5) * 0.9 + (vfNoise(wp * 6.0) - 0.5) * 0.35;
+        float verge = smoothstep(4.5, 5.0, ragged);
+        vec3 thatch = mix(srgb(0.40, 0.33, 0.19), srgb(0.50, 0.42, 0.24), vfNoise(wp * 3.0)) * 0.8;
+        col = mix(col, thatch, verge);
         diffuseColor.rgb = col;
       }
     `,
