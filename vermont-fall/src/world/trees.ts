@@ -65,7 +65,7 @@ function speciesFor(hue: Hue, r: number): SpeciesId {
 }
 
 export function placeTrees(T: Terrain, sunVisAt: (x: number, z: number) => number, sunDir: Vector3, densityScale = 1): TreeData {
-  const cell = 9.2 / Math.sqrt(densityScale)
+  const cell = 9.8 / Math.sqrt(densityScale)
   const cap = Math.ceil(((TREE_RECT.maxX - TREE_RECT.minX) / cell) * ((TREE_RECT.maxZ - TREE_RECT.minZ) / cell)) + 64
   const d: TreeData = {
     count: 0,
@@ -429,14 +429,6 @@ export class Forest {
         fm.receiveShadow = true
         fm.name = `trees-far-${SPECIES_LIST[si]}-${v}`
         this.far.push(fm)
-        // shadow proxy
-        const pm = this.instanced(buildTreeGeometry(SPECIES_LIST[si], 'shadow', seed), hidden, idx.length, false)
-        pm.customDepthMaterial = shadowDepth
-        idx.forEach((ti, slot) => writeInstance(pm, slot, d, ti))
-        pm.castShadow = true
-        pm.receiveShadow = false
-        pm.name = `trees-shadow-${SPECIES_LIST[si]}-${v}`
-        this.proxies.push(pm)
         // near (dynamic)
         if (quality.near) {
           const nm = this.instanced(buildTreeGeometry(SPECIES_LIST[si], 'near', seed), near.mat, 640, true)
@@ -447,6 +439,35 @@ export class Forest {
           nm.name = `trees-near-${SPECIES_LIST[si]}-${v}`
           this.near.push(nm)
           this.nearIndex.set(si * 16 + v, nm)
+        }
+      }
+    }
+    // shadow proxies: one per species per spatial tile, so the tight shadow
+    // frustum around the car only touches nearby trees
+    const TN = 3
+    const tw = (TREE_RECT.maxX - TREE_RECT.minX) / TN, th = (TREE_RECT.maxZ - TREE_RECT.minZ) / TN
+    for (let si = 0; si < SPECIES_LIST.length; si++) {
+      const geo = buildTreeGeometry(SPECIES_LIST[si], 'shadow', 1 + si * 101)
+      for (let tj = 0; tj < TN; tj++) {
+        for (let ti = 0; ti < TN; ti++) {
+          const idx: number[] = []
+          for (let i = 0; i < d.count; i++) {
+            if (d.species[i] !== si) continue
+            const cx = Math.min(TN - 1, Math.max(0, Math.floor((d.x[i] - TREE_RECT.minX) / tw)))
+            const cz = Math.min(TN - 1, Math.max(0, Math.floor((d.z[i] - TREE_RECT.minZ) / th)))
+            if (cx === ti && cz === tj) idx.push(i)
+          }
+          if (!idx.length) continue
+          const pm = this.instanced(geo, hidden, idx.length, false)
+          pm.customDepthMaterial = shadowDepth
+          idx.forEach((t, slot) => writeInstance(pm, slot, d, t))
+          pm.castShadow = true
+          pm.receiveShadow = false
+          pm.frustumCulled = true
+          pm.computeBoundingSphere()
+          pm.boundingSphere!.radius += 30
+          pm.name = `trees-shadow-${SPECIES_LIST[si]}-${ti}-${tj}`
+          this.proxies.push(pm)
         }
       }
     }
@@ -556,7 +577,7 @@ export function buildFarLumps(
   densityScale = 1,
 ): Object3D {
   const group = new Object3D()
-  const spacing = 16 / Math.sqrt(densityScale)
+  const spacing = 19 / Math.sqrt(densityScale)
   const minX = -2500, maxX = 2500, minZ = -2900, maxZ = 1500
   const pts: { x: number; z: number; y: number; hue: Hue; h: number; r: number; site: number; vis: number }[] = []
   const nrm = { x: 0, y: 1, z: 0 }
@@ -565,7 +586,9 @@ export function buildFarLumps(
       const ci = Math.round(gx / spacing), cj = Math.round(gz / spacing)
       const x = gx + (hash2(ci, cj, 11) - 0.5) * spacing * 0.9
       const z = gz + (hash2(ci, cj, 12) - 0.5) * spacing * 0.9
-      // only outside (and in the feathered rim of) the detailed forest
+      // only within view of the valley, outside (and in the rim of) the detailed forest
+      const dc = Math.hypot(x - 40, (z + 300) * 0.8)
+      if (dc > 2300 || z > 1450) continue
       const region = treeRegionWeight(x, z)
       if (hash2(ci, cj, 13) < region) continue
       if (T.clearing(x, z) > 0.4) continue
@@ -578,7 +601,7 @@ export function buildFarLumps(
       const nl = Math.max(0, nrm.x * sunDir.x + nrm.y * sunDir.y + nrm.z * sunDir.z)
       pts.push({
         x, z, y, hue,
-        h: 15 + 7 * rnd(),
+        h: (16 + 7 * rnd()) * Math.pow(1 / densityScale, 0.3),
         r: rnd(),
         site: Math.min(1.6, Math.max(0.35, (nl + 0.15) / (sunDir.y + 0.15))),
         vis: sunVisAt(x, z),

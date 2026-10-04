@@ -1,7 +1,10 @@
 import {
+  Box3,
   BufferAttribute,
   BufferGeometry,
+  Group,
   Mesh,
+  Sphere,
   MeshLambertMaterial,
   Vector3,
   Vector4,
@@ -20,7 +23,7 @@ function axisCoords(): Float32Array {
   let v = NEAR
   let step = NEAR_STEP
   while (v < FAR) {
-    step *= 1.05
+    step *= 1.065
     v = Math.min(FAR, v + step)
     outer.push(v)
   }
@@ -59,7 +62,7 @@ class CoarseHeights {
 }
 
 export interface TerrainBuild {
-  mesh: Mesh
+  mesh: Group
   coarse: CoarseHeights
   /** baked sun visibility (0..1) on the detailed grid */
   sunVisAt: (x: number, z: number) => number
@@ -148,25 +151,46 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     }
   }
 
-  const idx = new Uint32Array((N - 1) * (N - 1) * 6)
-  let o = 0
-  for (let j = 0; j < N - 1; j++) {
-    for (let i = 0; i < N - 1; i++) {
-      const a = j * N + i
-      const b = a + 1
-      const c = a + N
-      const d = c + 1
-      idx[o++] = a; idx[o++] = c; idx[o++] = b
-      idx[o++] = b; idx[o++] = c; idx[o++] = d
+  // shared vertex buffers, split into tiles so the camera only draws what it sees
+  const posA = new BufferAttribute(pos, 3)
+  const norA = new BufferAttribute(nor, 3)
+  const maskA = new BufferAttribute(mask, 4)
+  const TILE = 72
+  const tiles: BufferGeometry[] = []
+  for (let tj = 0; tj < N - 1; tj += TILE) {
+    for (let ti = 0; ti < N - 1; ti += TILE) {
+      const j1 = Math.min(N - 1, tj + TILE), i1 = Math.min(N - 1, ti + TILE)
+      const idx = new Uint32Array((j1 - tj) * (i1 - ti) * 6)
+      let o = 0
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity
+      for (let j = tj; j < j1; j++) {
+        for (let i = ti; i < i1; i++) {
+          const a = j * N + i
+          const b = a + 1
+          const c = a + N
+          const d = c + 1
+          idx[o++] = a; idx[o++] = c; idx[o++] = b
+          idx[o++] = b; idx[o++] = c; idx[o++] = d
+        }
+      }
+      for (const j of [tj, j1]) for (const i of [ti, i1]) {
+        minX = Math.min(minX, A[i]); maxX = Math.max(maxX, A[i])
+        minZ = Math.min(minZ, A[j]); maxZ = Math.max(maxZ, A[j])
+      }
+      for (let j = tj; j <= j1; j += 4) for (let i = ti; i <= i1; i += 4) {
+        const y = pos[(j * N + i) * 3 + 1]
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+      }
+      const g = new BufferGeometry()
+      g.setAttribute('position', posA)
+      g.setAttribute('normal', norA)
+      g.setAttribute('aMask', maskA)
+      g.setIndex(new BufferAttribute(idx, 1))
+      g.boundingBox = new Box3(new Vector3(minX, minY - 20, minZ), new Vector3(maxX, maxY + 30, maxZ))
+      g.boundingSphere = g.boundingBox.getBoundingSphere(new Sphere())
+      tiles.push(g)
     }
   }
-
-  const geo = new BufferGeometry()
-  geo.setAttribute('position', new BufferAttribute(pos, 3))
-  geo.setAttribute('normal', new BufferAttribute(nor, 3))
-  geo.setAttribute('aMask', new BufferAttribute(mask, 4))
-  geo.setIndex(new BufferAttribute(idx, 1))
-  geo.computeBoundingSphere()
 
   const mat = new MeshLambertMaterial({ color: 0xffffff })
   patchMaterial(mat, {
@@ -346,11 +370,16 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     `,
   })
 
-  const mesh = new Mesh(geo, mat)
-  mesh.receiveShadow = true
-  mesh.castShadow = true
-  mesh.frustumCulled = false
+  // hills already carry their baked golden-hour shadows, so the land casts none
+  const mesh = new Group()
   mesh.name = 'terrain'
+  for (const g of tiles) {
+    const m = new Mesh(g, mat)
+    m.receiveShadow = true
+    m.castShadow = false
+    m.frustumCulled = true
+    mesh.add(m)
+  }
   // bilinear lookup on the warped grid (binary search on the shared axis)
   const axisIndex = (v: number) => {
     let lo = 0, hi = N - 1

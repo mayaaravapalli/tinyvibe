@@ -206,10 +206,17 @@ export class Leaves {
         if (d2 < 64 && dy < 4) {
           const f = 1 - Math.sqrt(d2) / 8
           const sp = car.vel.length()
-          const side = (dx * car.fwd.z - dz * car.fwd.x) > 0 ? 1 : -1
-          ax += car.vel.x * 0.65 * f + car.fwd.z * side * sp * 0.35 * f
-          az += car.vel.z * 0.65 * f - car.fwd.x * side * sp * 0.35 * f
-          ay += sp * 0.32 * f
+          const along = dx * car.fwd.x + dz * car.fwd.z
+          if (along > -0.5) {
+            // ahead of the car the air rides up over the hood and the glass
+            ay += sp * 0.12 * f
+          } else {
+            // behind it, the wake drags leaves along, lifts them and flings them aside
+            const side = (dx * car.fwd.z - dz * car.fwd.x) > 0 ? 1 : -1
+            ax += car.vel.x * 0.65 * f + car.fwd.z * side * sp * 0.35 * f
+            az += car.vel.z * 0.65 * f - car.fwd.x * side * sp * 0.35 * f
+            ay += sp * 0.32 * f
+          }
         }
       }
       // the pointer's breath of air around the car
@@ -282,6 +289,8 @@ export class Leaves {
         x += vx * dt
         z += vz * dt
         y = this.ground(x, z) + 0.012
+        // from the sky a resting leaf is only a speck: let it go quickly
+        if (mode === 'aerial') this.age[i] += dt * 3
         if (this.age[i] > this.rest[i]) {
           this.state[i] = FREE
           continue

@@ -284,7 +284,7 @@ function deciduous(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
 
   // trunk
   const trunkTop = new Vector3(crown.c.x * 0.6, H * (crownBase + crownH * 0.45), crown.c.z * 0.6)
-  const sides = lod === 'near' ? 7 : 5
+  const sides = lod === 'near' ? 7 : 4
   const tr = H * (def.id === 'birch' ? 0.022 : 0.03)
   const lean = new Vector3((rnd() - 0.5) * 0.4, 0, (rnd() - 0.5) * 0.4)
   if (lod !== 'shadow' && lod !== 'lump') barkLimb(b, limb(new Vector3(0, -0.6, 0), trunkTop, tr, tr * 0.35, sides, lod === 'near' ? 4 : 1, lean), H, barkCol, rnd)
@@ -292,8 +292,9 @@ function deciduous(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   // clump centres spread through the envelope (top-heavy, like a real crown)
   const centers: Vector3[] = []
   const golden = Math.PI * (3 - Math.sqrt(5))
-  const count = lod === 'lump' ? 2 : lod === 'shadow' ? 2 : lod === 'far' ? Math.max(5, nClumps - 3) : nClumps
-  for (let i = 0; i < count; i++) {
+  const count = lod === 'lump' || lod === 'shadow' ? 1 : lod === 'far' ? 3 : nClumps
+  if (count === 1) centers.push(crown.c.clone())
+  for (let i = 0; i < count && count > 1; i++) {
     const t = (i + 0.5) / count
     const yN = 1 - t * 1.55 // from top towards lower-middle
     const rr = Math.sqrt(Math.max(0, 1 - yN * yN))
@@ -309,7 +310,7 @@ function deciduous(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   }
   if (lod !== 'shadow' && lod !== 'lump') {
     // main limbs reaching for the clumps (visible from the road)
-    const limbs = lod === 'near' ? centers.length : 2
+    const limbs = lod === 'near' ? centers.length : 1
     for (let i = 0; i < limbs; i++) {
       const c = centers[centers.length - 1 - (i % centers.length)]
       const from = new Vector3(0, H * (crownBase + 0.03 + rnd() * 0.14), 0).lerp(trunkTop, 0.2 + rnd() * 0.2)
@@ -329,7 +330,7 @@ function deciduous(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   const detail = lod === 'near' ? 1 : 0
   const bump = lod === 'near' ? 0.26 : lod === 'far' ? 0.2 : 0.12
   for (let i = 0; i < centers.length; i++) {
-    const s = clumpR * (0.85 + rnd() * 0.35) * (lod === 'shadow' || lod === 'lump' ? 1.5 : lod === 'far' ? 1.12 : 1.0)
+    const s = clumpR * (0.85 + rnd() * 0.35) * (lod === 'shadow' || lod === 'lump' ? 2.1 : lod === 'far' ? 1.36 : 1.0)
     const rad = new Vector3(crown.r.x * s, crown.r.y * s * 0.8, crown.r.z * s)
     if (lod === 'near') {
       // a dim inner core keeps the crown from looking hollow; leaf cards carry the surface
@@ -391,7 +392,7 @@ function spruce(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   const barkCol = new Color(def.bark)
   const sides = lod === 'near' ? 6 : 4
   if (lod !== 'shadow' && lod !== 'lump') barkLimb(b, limb(new Vector3(0, -0.6, 0), new Vector3(0, H * 0.92, 0), H * 0.022, H * 0.004, sides, 1, null), H, barkCol, rnd)
-  const tiers = lod === 'shadow' || lod === 'lump' ? 2 : lod === 'far' ? 5 : 9
+  const tiers = lod === 'lump' ? 1 : lod === 'shadow' ? 2 : lod === 'far' ? 3 : 9
   const base = H * 0.12
   const crown: Crown = { c: new Vector3(0, H * 0.48, 0), r: new Vector3(H * 0.2, H * 0.5, H * 0.2) }
   const rim = lod === 'near' ? 11 : 8
@@ -458,7 +459,7 @@ function pine(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
   const top = new Vector3((rnd() - 0.5) * 1.2, H * 0.93, (rnd() - 0.5) * 1.2)
   if (lod !== 'shadow' && lod !== 'lump') barkLimb(b, limb(new Vector3(0, -0.6, 0), top, H * 0.022, H * 0.006, sides, lod === 'near' ? 3 : 1, null), H, barkCol, rnd)
   const crown: Crown = { c: new Vector3(0, H * 0.66, 0), r: new Vector3(H * 0.22, H * 0.34, H * 0.22) }
-  const pads = lod === 'shadow' || lod === 'lump' ? 3 : lod === 'far' ? 5 : 9
+  const pads = lod === 'shadow' || lod === 'lump' ? 2 : lod === 'far' ? 3 : 9
   for (let i = 0; i < pads; i++) {
     const f = i / pads
     const y = H * (0.42 + 0.5 * f)

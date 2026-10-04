@@ -32,7 +32,7 @@ function bladeClump(): BufferGeometry {
   const tip: number[] = []
   const idx: number[] = []
   const rnd = mulberry32(5)
-  for (let b = 0; b < 7; b++) {
+  for (let b = 0; b < 5; b++) {
     const a = rnd() * Math.PI * 2
     const ox = Math.cos(a) * 0.16 * rnd(), oz = Math.sin(a) * 0.16 * rnd()
     const lean = 0.15 + rnd() * 0.3
@@ -40,8 +40,8 @@ function bladeClump(): BufferGeometry {
     const h = 0.55 + rnd() * 0.45
     const dx = Math.cos(a + 1.57), dz = Math.sin(a + 1.57)
     const base = pos.length / 3
-    for (let k = 0; k <= 3; k++) {
-      const t = k / 3
+    for (let k = 0; k <= 2; k++) {
+      const t = k / 2
       const y = h * t
       const off = lean * t * t
       const ww = w * (1 - t * 0.85)
@@ -51,7 +51,7 @@ function bladeClump(): BufferGeometry {
         tip.push(t)
       }
     }
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 2; k++) {
       const i0 = base + k * 2
       idx.push(i0, i0 + 1, i0 + 2, i0 + 1, i0 + 3, i0 + 2)
     }
@@ -191,9 +191,9 @@ export class GroundDetail {
       let n = 0
       // grass: thick on the mown verge, thinning into the fields and the woods
       const bands: [number, number, number][] = [
-        [5.9, 10, 9],
-        [10, 20, 2.6],
-        [20, 32, 1.0],
+        [5.9, 10, 7],
+        [10, 20, 2.0],
+        [20, 32, 0.8],
       ]
       for (const [l0, l1, per] of bands) {
         const count = Math.floor(CHUNK * 2 * (l1 - l0) * per * density)
@@ -305,7 +305,7 @@ export class GroundDetail {
   update(cam: Vector3, aboveGround: number) {
     const on = aboveGround < 60
     for (const c of this.chunks) {
-      const vis = on && c.center.distanceToSquared(cam) < 210 * 210
+      const vis = on && c.center.distanceToSquared(cam) < 170 * 170
       for (const m of c.mesh) m.visible = vis
     }
   }
