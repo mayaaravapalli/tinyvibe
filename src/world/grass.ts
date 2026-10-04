@@ -244,12 +244,16 @@ export class GroundDetail {
     }
   }
 
+  visibleChunks = 0
+
   /** Show only the chunks around a low camera. */
   update(cam: Vector3, aboveGround: number) {
     const on = aboveGround < 60
+    this.visibleChunks = 0
     for (const c of this.chunks) {
       const vis = on && c.center.distanceToSquared(cam) < 130 * 130
       for (const m of c.mesh) m.visible = vis
+      if (vis) this.visibleChunks++
     }
   }
 }

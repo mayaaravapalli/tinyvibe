@@ -41,6 +41,8 @@ export interface BridgeBuild {
   depthInside(p: Vector3): number
   center: Vector3
   axis: Vector3
+  /** the dusty light blades, hidden while they have faded out */
+  shafts: Group
 }
 
 class Merge {
@@ -366,7 +368,8 @@ export function buildBridge(T: Terrain): BridgeBuild {
   group.add(stoneMesh)
 
   // ---------------------------------------------------------------- light shafts
-  group.add(buildShafts(across, axis, L))
+  const shafts = buildShafts(across, axis, L)
+  group.add(shafts)
 
   const local = new Vector3()
   const inv = new Matrix4()
@@ -375,6 +378,7 @@ export function buildBridge(T: Terrain): BridgeBuild {
   const toLocal = (p: Vector3) => local.copy(p).applyMatrix4(inv)
   return {
     group,
+    shafts,
     center,
     axis,
     contains(p: Vector3) {
@@ -389,6 +393,9 @@ export function buildBridge(T: Terrain): BridgeBuild {
   }
 }
 
+/** how strongly the light shafts show: only inside the barrel or right at the portal */
+export const SHAFT_U = { value: 0 }
+
 /** Soft blades of dusty sunlight through the windows and the widest board gaps. */
 function buildShafts(across: Vector3, axis: Vector3, L: number): Group {
   const g = new Group()
@@ -396,7 +403,7 @@ function buildShafts(across: Vector3, axis: Vector3, L: number): Group {
   const s = new Vector3(sunW.dot(across), sunW.y, sunW.dot(axis))
   const side = Math.sign(s.x) || 1
   const mat = new ShaderMaterial({
-    uniforms: { uTime: U.uTime, uColor: { value: new Color('#ffd9a3') } },
+    uniforms: { uTime: U.uTime, uColor: { value: new Color('#ffd9a3') }, uShaft: SHAFT_U },
     transparent: true,
     depthWrite: false,
     blending: AdditiveBlending,
@@ -414,6 +421,7 @@ function buildShafts(across: Vector3, axis: Vector3, L: number): Group {
     fragmentShader: /* glsl */ `
       uniform float uTime;
       uniform vec3 uColor;
+      uniform float uShaft;
       varying vec2 vUv;
       varying vec3 vW;
       float h(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
@@ -424,7 +432,7 @@ function buildShafts(across: Vector3, axis: Vector3, L: number): Group {
         // drifting dust
         vec2 q = vec2(vUv.x * 9.0, vUv.y * 30.0 - uTime * 0.25);
         float dust = step(0.985, h(floor(q))) * 2.5;
-        float a = across * along * (0.16 + dust * 0.25);
+        float a = across * along * (0.16 + dust * 0.25) * uShaft;
         gl_FragColor = vec4(uColor * a, 1.0);
       }
     `,

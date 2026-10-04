@@ -21,7 +21,7 @@ import { smoothstep } from './core/noise'
 import { pickGround } from './core/pick'
 import { Input } from './input'
 import { U } from './render/shared'
-import { buildBridge, type BridgeBuild } from './world/bridge'
+import { SHAFT_U, buildBridge, type BridgeBuild } from './world/bridge'
 import { buildBuildings, type BuildingsBuild } from './world/buildings'
 import { GroundDetail } from './world/grass'
 import { buildProps } from './world/props'
@@ -88,6 +88,7 @@ export class App {
   onCarHover: (over: boolean) => void = () => {}
   onWindDrag: () => void = () => {}
   onFrame: (dt: number) => void = () => {}
+  onFrameDebug: (dt: number) => void = () => {}
 
   pose: CameraPose = { pos: new Vector3(), target: new Vector3(), fov: 30, roll: 0 }
   private aerialPose: CameraPose = { pos: new Vector3(), target: new Vector3(), fov: 30, roll: 0 }
@@ -621,11 +622,20 @@ export class App {
     this.ambientGusts(dt)
     this.wind.update(dt)
     this.forest.update(this.camera.position)
-    this.ground.update(this.camera.position, above)
-    this.meadow.update(above)
+    // ground layers belong to the drive; never let an altitude test hide them while in the car
+    const groundAlt = this.mode === 'pov' ? 2 : above
+    this.ground.update(this.camera.position, groundAlt)
+    this.meadow.update(groundAlt)
     this.updateLife(dt, above)
     this.updateShadowFit()
     const inside = this.bridge.depthInside(this.camera.position)
+    {
+      // shafts are an interior effect: from outside they only read as glare
+      const dc = this.camera.position.distanceTo(this.bridge.center)
+      const goalS = Math.max(inside > 0 ? 1 : 0, 1 - smoothstep(20, 34, dc)) * (1 - smoothstep(60, 140, this.camera.position.y - this.bridge.center.y))
+      SHAFT_U.value += (goalS - SHAFT_U.value) * (1 - Math.exp(-dt * 3))
+      this.bridge.shafts.visible = SHAFT_U.value > 0.004
+    }
     const goal = this.baseExposure * (1 + 0.95 * inside)
     // adapting up to the dark is slower than clamping down after the bright exit
     const rate = goal > this.exposure ? 0.85 : 1.25
@@ -637,6 +647,7 @@ export class App {
     }
     this.renderer.render(this.scene, this.camera)
     this.onFrame(dt)
+    this.onFrameDebug(dt)
   }
 
   start(onFrame?: (n: number) => boolean) {

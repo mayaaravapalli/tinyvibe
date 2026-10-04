@@ -18,7 +18,9 @@ export interface Quality {
 const TIERS: Record<Quality['name'], Omit<Quality, 'pixelRatio'> & { maxDpr: number }> = {
   high: { name: 'high', maxDpr: 2, shadowMap: 4096, treeDensity: 1, lumpDensity: 1, grassDensity: 1, leaves: 720, nearTrees: true, nearRange: [55, 70, 230, 270], antialias: true },
   medium: { name: 'medium', maxDpr: 1.5, shadowMap: 2048, treeDensity: 0.7, lumpDensity: 0.55, grassDensity: 0.55, leaves: 480, nearTrees: true, nearRange: [45, 58, 170, 205], antialias: true },
-  low: { name: 'low', maxDpr: 1.25, shadowMap: 2048, treeDensity: 0.45, lumpDensity: 0.35, grassDensity: 0.3, leaves: 280, nearTrees: true, nearRange: [34, 44, 115, 140], antialias: true },
+  // phones: their GPUs cope with geometry far better than with pixels, so the forest stays
+  // full (a thinned forest reads as toy trees on bare ground) and resolution pays instead
+  low: { name: 'low', maxDpr: 1.25, shadowMap: 2048, treeDensity: 0.62, lumpDensity: 0.45, grassDensity: 0.4, leaves: 280, nearTrees: true, nearRange: [38, 48, 140, 165], antialias: true },
 }
 
 function gpuName(): string {

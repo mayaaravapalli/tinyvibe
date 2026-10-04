@@ -304,28 +304,37 @@ export function makeFoliageAtlas(tile = 512): Texture {
   at(TILE.oak, () => cluster('oak', 14, 0.1, 0.15, 4))
   at(TILE.birch, () => cluster('birch', 30, 0.055, 0.085, 6))
 
-  // needle spray: a woody stem, side shoots, short needles
+  // needle spray: a dense, flattened bough. A dark inner mass keeps it solid as it
+  // shrinks in the mip chain; bright needles on top give it a bristly, lit edge.
   at(TILE.needles, () => {
     g.lineCap = 'round'
-    const shoot = (x0: number, y0: number, x1: number, y1: number, nl: number) => {
-      const gv = rnd() * 255
-      g.strokeStyle = col(80, gv, 255)
-      g.lineWidth = tile * 0.006
+    const pad = tile * 0.03
+    const sy = tile * 0.5
+    const halfW = (t: number) => tile * (0.4 - 0.22 * t) * Math.min(1, 0.55 + t * 3)
+    // inner mass: overlapping dark blobs along the bough
+    for (let k = 0; k < 150; k++) {
+      const t = rnd()
+      const x = pad + (tile - 2 * pad) * t
+      const y = sy + (rnd() - 0.5) * 1.15 * halfW(t)
+      const r = tile * (0.02 + rnd() * 0.025) * (1 - 0.4 * t)
+      const l = 85 + rnd() * 50
+      g.fillStyle = col(l, rnd() * 255, 0)
       g.beginPath()
-      g.moveTo(x0, y0)
-      g.lineTo(x1, y1)
-      g.stroke()
-      const n = Math.floor(Math.hypot(x1 - x0, y1 - y0) / (tile * 0.0065))
+      g.ellipse(x, y, r * 1.5, r, (rnd() - 0.5) * 0.6, 0, Math.PI * 2)
+      g.fill()
+    }
+    const needles = (x0: number, y0: number, x1: number, y1: number, nl: number, bright: number) => {
+      const n = Math.floor(Math.hypot(x1 - x0, y1 - y0) / (tile * 0.0055))
       const a = Math.atan2(y1 - y0, x1 - x0)
       for (let i = 0; i < n; i++) {
         const t = i / n
         const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t
-        const taper = 1 - 0.5 * t
-        for (const s of [-1, 1]) {
-          const l = 135 + rnd() * 110
-          g.strokeStyle = col(l, gv, 0)
-          g.lineWidth = tile * 0.0045
-          const aa = a + s * (0.95 + rnd() * 0.45)
+        const taper = 1 - 0.45 * t
+        for (const sd of [-1, 1]) {
+          const l = bright * (0.75 + rnd() * 0.5)
+          g.strokeStyle = col(Math.min(255, l), rnd() * 255, 0)
+          g.lineWidth = tile * (0.006 + rnd() * 0.003)
+          const aa = a + sd * (0.7 + rnd() * 0.5)
           const len = nl * taper * (0.75 + rnd() * 0.5)
           g.beginPath()
           g.moveTo(x, y)
@@ -334,16 +343,19 @@ export function makeFoliageAtlas(tile = 512): Texture {
         }
       }
     }
-    const pad = tile * 0.02
-    const sy = tile * 0.5
-    shoot(pad, sy, tile - pad, sy + tile * 0.04, tile * 0.03)
-    for (let i = 0; i < 10; i++) {
-      const t = 0.06 + i * 0.09
-      const x = pad + (tile - 2 * pad) * t
-      const side = i % 2 ? 1 : -1
-      const len = tile * (0.3 - 0.18 * t) * (0.8 + rnd() * 0.4)
-      shoot(x, sy, x + len * 0.75, sy + side * len * 0.62, tile * 0.022)
+    // side shoots fill the bough to its outline, then the main shoot down the middle
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < 16; i++) {
+        const t = 0.03 + (i + rnd() * 0.6) / 16.5
+        const x = pad + (tile - 2 * pad) * t
+        for (const side of [-1, 1]) {
+          const reach = halfW(t) * (0.75 + rnd() * 0.3)
+          const ex = x + reach * (0.55 + rnd() * 0.3), ey = sy + side * reach
+          needles(x, sy + side * tile * 0.01, ex, ey, tile * 0.03, pass === 0 ? 140 : 205)
+        }
+      }
     }
+    needles(pad, sy, tile - pad, sy + tile * 0.02, tile * 0.034, 200)
   })
 
   // hay-scented fern: an arching frond, base at the bottom of the tile (v = 0)

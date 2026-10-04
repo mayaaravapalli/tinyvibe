@@ -5,6 +5,7 @@ import { detectQuality } from './config'
 import './style.css'
 import { Ui } from './ui/ui'
 import { Ambience } from './audio/audio'
+import { installDebug } from './ui/debug'
 
 const params = new URLSearchParams(location.search)
 const canvas = document.getElementById('scene') as HTMLCanvasElement
@@ -30,6 +31,7 @@ requestAnimationFrame(() =>
     app.build()
     const buildMs = performance.now() - t0
     window.__vf = app
+    const toggleDebug = installDebug(app)
     if (params.get('cam')) app.camOverride = params.get('cam')!.split(',').map(Number)
 
     const audio = new Ambience()
@@ -38,6 +40,7 @@ requestAnimationFrame(() =>
       : new Ui(app, {
           toggleSound: () => audio.toggle(),
           setReducedMotion: (v) => (app.reducedMotion = v),
+          toggleDebug,
         })
     ;(window as unknown as { __ui: Ui | null }).__ui = ui
     app.onWindDrag = () => ui?.noteDrag()

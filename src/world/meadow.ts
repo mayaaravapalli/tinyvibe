@@ -3,7 +3,6 @@ import {
   BufferGeometry,
   DataTexture,
   DoubleSide,
-  FloatType,
   Group,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
@@ -11,7 +10,6 @@ import {
   Mesh,
   MeshLambertMaterial,
   NearestFilter,
-  RedFormat,
   RGBAFormat,
   UnsignedByteType,
   Vector3,
@@ -37,15 +35,19 @@ export const GLSL_GROUND = /* glsl */ `
 uniform sampler2D uHeightTex;
 uniform sampler2D uMeadowTex;
 uniform vec3 uGround; // min, step, n
+// heights are packed as 16 bits in RG (−200 m .. 1200 m, ~2 cm steps): works on every GPU
+float vfDecodeH(vec4 t) {
+  return (floor(t.r * 255.0 + 0.5) * 256.0 + floor(t.g * 255.0 + 0.5)) / 65535.0 * 1400.0 - 200.0;
+}
 float vfGroundH(vec2 p) {
   vec2 f = (p - uGround.x) / uGround.y;
   ivec2 n2 = ivec2(int(uGround.z) - 2);
   ivec2 i = clamp(ivec2(floor(f)), ivec2(0), n2);
   vec2 t = clamp(f - vec2(i), 0.0, 1.0);
-  float a = texelFetch(uHeightTex, i, 0).r;
-  float b = texelFetch(uHeightTex, i + ivec2(1, 0), 0).r;
-  float c = texelFetch(uHeightTex, i + ivec2(0, 1), 0).r;
-  float d = texelFetch(uHeightTex, i + ivec2(1, 1), 0).r;
+  float a = vfDecodeH(texelFetch(uHeightTex, i, 0));
+  float b = vfDecodeH(texelFetch(uHeightTex, i + ivec2(1, 0), 0));
+  float c = vfDecodeH(texelFetch(uHeightTex, i + ivec2(0, 1), 0));
+  float d = vfDecodeH(texelFetch(uHeightTex, i + ivec2(1, 1), 0));
   // same diagonal as the terrain mesh, so roots sit exactly on the ground
   if (t.x + t.y <= 1.0) return a + (b - a) * t.x + (c - a) * t.y;
   return d + (c - d) * (1.0 - t.x) + (b - d) * (1.0 - t.y);
@@ -97,7 +99,14 @@ export const GROUND_U = {
 }
 
 function textures(g: GroundGrid) {
-  const h = new DataTexture(g.height, g.n, g.n, RedFormat, FloatType)
+  const packed = new Uint8Array(g.n * g.n * 4)
+  for (let i = 0; i < g.n * g.n; i++) {
+    const v = Math.max(0, Math.min(65535, Math.round(((g.height[i] + 200) / 1400) * 65535)))
+    packed[i * 4] = v >> 8
+    packed[i * 4 + 1] = v & 255
+    packed[i * 4 + 3] = 255
+  }
+  const h = new DataTexture(packed, g.n, g.n, RGBAFormat, UnsignedByteType)
   h.minFilter = h.magFilter = NearestFilter
   h.needsUpdate = true
   const m = new DataTexture(g.meadow, g.n, g.n, RGBAFormat, UnsignedByteType)

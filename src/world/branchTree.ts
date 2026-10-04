@@ -123,8 +123,8 @@ export function shrubParams(kind: 'maple' | 'sumac', height: number): GrowParams
       trunkFrac: 0.85,
       trunkRadius: 0.018,
       flare: 1.1,
-      limbs: 3,
-      limbAngle: [0.5, 1.0],
+      limbs: 4,
+      limbAngle: [0.45, 1.05],
       children: [],
       childAngle: [],
       lenRatio: [0.7],
@@ -132,9 +132,9 @@ export function shrubParams(kind: 'maple' | 'sumac', height: number): GrowParams
       droop: 0.2,
       maxDepth: 1,
       tile: TILE.sumac,
-      cardSize: 0.42,
-      cardsTip: 2,
-      cardsPerMetre: 0,
+      cardSize: 0.19,
+      cardsTip: 4,
+      cardsPerMetre: 1.6,
       sides: [4, 3],
       segs: [3, 1],
       core: 0,
@@ -160,9 +160,9 @@ export function shrubParams(kind: 'maple' | 'sumac', height: number): GrowParams
     droop: 0.1,
     maxDepth: 2,
     tile: TILE.maple,
-    cardSize: 0.2,
-    cardsTip: 2,
-    cardsPerMetre: 1.2,
+    cardSize: 0.13,
+    cardsTip: 3,
+    cardsPerMetre: 2.4,
     sides: [4, 3, 3],
     segs: [2, 1, 1],
     core: 0,
@@ -384,6 +384,168 @@ export function growTree(p: GrowParams, seed: number, b: Builder = new Builder()
     g.computeVertexNormals()
     const cr = rnd()
     b.add(g, (_i, P) => [Math.max(0, P.y / H), cr, 0.26, 1], leafCol)
+  }
+  return b
+}
+
+/**
+ * Conifers grown the way they grow: a straight trunk with whorls of branches,
+ * each branch a drooping, feathery frond of needles. Spruce and hemlock are
+ * dense and conical; white pine is tall, open and irregular with tufted ends.
+ */
+export function growConifer(kind: 'spruce' | 'pine', lod: 'near' | 'mid', H: number, barkHex: string, seed: number): Builder {
+  const rnd = mulberry32(seed * 7919 + 41)
+  const b = new Builder()
+  const near = lod === 'near'
+  const bark = new Color(barkHex)
+  const none = new Color(0, 0, 0)
+  const spruce = kind === 'spruce'
+  const top = new Vector3((rnd() - 0.5) * (spruce ? 0.3 : 1.4), H * (spruce ? 0.99 : 0.95), (rnd() - 0.5) * (spruce ? 0.3 : 1.4))
+
+  // ---- trunk (flared) and dead twigs low down
+  const trunkR = H * (spruce ? 0.022 : 0.024)
+  const ring = (c: Vector3, r: number, sides: number, ao: number, u: number) => {
+    const ids: number[] = []
+    for (let s = 0; s <= sides; s++) {
+      const a = (s / sides) * Math.PI * 2
+      const n = new Vector3(Math.cos(a), 0, Math.sin(a))
+      ids.push(b.vertex(c.clone().addScaledVector(n, r), n, [Math.max(0, c.y / H), u, ao, 0], bark, s / sides, c.y))
+    }
+    return ids
+  }
+  {
+    const sides = near ? 8 : 5
+    const segs = near ? 6 : 3
+    let prev: number[] | null = null
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs
+      const c = new Vector3(0, -0.5, 0).lerp(top, t)
+      let r = trunkR * (1 - 0.92 * t)
+      if (i === 0) r *= 1.6
+      const cur = ring(c, r, sides, 0.45 + 0.4 * t, 0.3)
+      if (prev) for (let s = 0; s < sides; s++) {
+        b.tri(prev[s], cur[s], prev[s + 1])
+        b.tri(prev[s + 1], cur[s], cur[s + 1])
+      }
+      prev = cur
+    }
+    if (near) {
+      // brittle dead lower branches, a hallmark of a conifer in a forest
+      const deadTop = H * (spruce ? 0.16 : 0.42)
+      for (let k = 0; k < (spruce ? 7 : 10); k++) {
+        const y = 0.6 + rnd() * (deadTop - 0.6)
+        const a = rnd() * Math.PI * 2
+        const len = H * (0.04 + rnd() * 0.07)
+        const p0 = new Vector3(0, y, 0)
+        const p1 = new Vector3(Math.cos(a) * len, y - len * 0.25, Math.sin(a) * len)
+        const d = p1.clone().sub(p0).normalize()
+        const side = new Vector3(-d.z, 0, d.x).multiplyScalar(0.012)
+        const n = new Vector3(0, 1, 0)
+        const i0 = b.vertex(p0.clone().add(side), n, [y / H, 0, 0.5, 0], bark, 0, 0)
+        const i1 = b.vertex(p0.clone().sub(side), n, [y / H, 0, 0.5, 0], bark, 1, 0)
+        const i2 = b.vertex(p1, n, [y / H, 0, 0.5, 0], bark, 0.5, 1)
+        b.tri(i0, i2, i1)
+      }
+    }
+  }
+
+  // ---- a thin shaded core so the tree never looks hollow against the sky
+  if (spruce) {
+    const coreSides = near ? 8 : 6
+    const cb = H * 0.12, ct = H * 0.96
+    const ids0: number[] = [], ids1: number[] = []
+    for (let s = 0; s <= coreSides; s++) {
+      const a = (s / coreSides) * Math.PI * 2
+      const n = new Vector3(Math.cos(a), 0.5, Math.sin(a)).normalize()
+      const R = H * (near ? 0.045 : 0.07)
+      ids0.push(b.vertex(new Vector3(Math.cos(a) * R, cb, Math.sin(a) * R), n, [cb / H, 0.5, 0.22, 1], none))
+      ids1.push(b.vertex(new Vector3(top.x, ct, top.z), n, [ct / H, 0.5, 0.3, 1], none))
+    }
+    for (let s = 0; s < coreSides; s++) {
+      b.tri(ids0[s], ids1[s], ids0[s + 1])
+      b.tri(ids0[s + 1], ids1[s], ids1[s + 1])
+    }
+  }
+
+  // ---- whorls of branches carrying needle fronds
+  const whorls = spruce ? (near ? 20 : 11) : near ? 11 : 9
+  const golden = Math.PI * (3 - Math.sqrt(5))
+  const yBase = H * (spruce ? 0.12 : 0.4)
+  for (let w = 0; w < whorls; w++) {
+    const t = (w + rnd() * 0.6) / whorls
+    const y = yBase + (H * 0.97 - yBase) * t
+    const axis = new Vector3(0, -0.5, 0).lerp(top, (y + 0.5) / (top.y + 0.5))
+    const reach = spruce ? H * 0.21 * Math.pow(1 - t, 0.85) + 0.35 : H * (0.1 + 0.2 * Math.sin(Math.PI * Math.min(1, 0.25 + t * 0.85))) * (0.75 + rnd() * 0.5)
+    const count = spruce ? (near ? 8 : 6) : near ? 6 : 5
+    for (let k = 0; k < count; k++) {
+      if (!spruce && rnd() < 0.2) continue // white pines lose branches; the gaps are part of their look
+      const az = w * golden + (k / count) * Math.PI * 2 + (rnd() - 0.5) * 0.5
+      const dir = new Vector3(Math.cos(az), 0, Math.sin(az))
+      const side = new Vector3(-dir.z, 0, dir.x)
+      const L = reach * (0.8 + rnd() * 0.35)
+      // spruce boughs droop more lower down; pine limbs rise, then level out
+      const rise = spruce ? 0.18 * t - 0.05 : 0.25 - 0.1 * t
+      const droop = spruce ? L * (0.1 + 0.28 * (1 - t)) : L * 0.08
+      const path = (u: number) => axis.clone().addScaledVector(dir, L * u).add(new Vector3(0, L * rise * u - droop * u * u, 0))
+      const br = rnd()
+      const u0 = spruce ? 0.06 : 0.42
+      const segs = near ? 3 : 2
+      const n = dir.clone().multiplyScalar(0.8).add(new Vector3(0, 0.75, 0)).normalize()
+      // the bough itself: a flat spray along the limb; further off, a second one hangs
+      // below it so the bough keeps its body when seen edge-on (no fishbone slats)
+      for (let layer = 0; layer < (near ? 1 : 2); layer++) {
+        const tilt = layer === 0 ? 0.12 : 1.0
+        const across = side.clone().multiplyScalar(Math.cos(tilt)).add(new Vector3(0, -Math.sin(tilt), 0))
+        const width = L * (spruce ? 0.62 : 0.55) * (near ? 0.75 : layer === 0 ? 1 : 0.7)
+        const rows: number[][] = []
+        for (let i = 0; i <= segs; i++) {
+          const f = i / segs
+          const u = u0 + (1 - u0) * f
+          const c = path(u)
+          const wHalf = width * 0.5 * (1 - 0.45 * f)
+          const outer = Math.min(1, 0.35 + 0.65 * f)
+          const ao = Math.min(1, (0.55 + 0.4 * t) * (0.72 + 0.33 * outer) * (layer === 0 ? 1 : 0.82))
+          const row: number[] = []
+          for (const v of [0, 1]) {
+            const p = c.clone().addScaledVector(across, (v - 0.5) * 2 * wHalf)
+            const [uu, vv] = tileUv(TILE.needles, f, v)
+            row.push(b.vertex(p, n, [Math.max(0, p.y / H), br, ao, 2], none, uu, vv))
+          }
+          rows.push(row)
+        }
+        for (let i = 0; i < segs; i++) {
+          b.tri(rows[i][0], rows[i + 1][0], rows[i][1])
+          b.tri(rows[i][1], rows[i + 1][0], rows[i + 1][1])
+        }
+      }
+      // close up, side sprays fan off the limb at their own angles so the bough has depth
+      if (near) {
+        const sprays = spruce ? 4 : 3
+        for (let k2 = 0; k2 < sprays; k2++) {
+          const f0 = 0.12 + (0.72 * k2) / (sprays - 1)
+          const o = path(u0 + (1 - u0) * f0)
+          const yaw = (k2 % 2 ? 1 : -1) * (0.5 + rnd() * 0.45)
+          const pitch = -0.15 - rnd() * 0.45 + (spruce ? 0 : 0.2)
+          const sd = dir.clone().multiplyScalar(Math.cos(yaw)).addScaledVector(side, Math.sin(yaw))
+          sd.multiplyScalar(Math.cos(pitch)).add(new Vector3(0, Math.sin(pitch), 0)).normalize()
+          const roll = (rnd() - 0.5) * 1.1
+          const sAcross = new Vector3(-sd.z, 0, sd.x).normalize()
+          sAcross.multiplyScalar(Math.cos(roll)).add(new Vector3(0, Math.sin(roll), 0))
+          const len = L * (0.5 - 0.22 * f0) * (0.8 + rnd() * 0.4)
+          const wHalf = len * 0.32
+          const ao = Math.min(1, (0.5 + 0.4 * t) * (0.75 + 0.3 * f0))
+          const sn = sd.clone().multiplyScalar(0.6).add(new Vector3(0, 0.8, 0)).normalize()
+          const ids: number[] = []
+          for (const [f, v] of [[0, 0], [0, 1], [1, 0], [1, 1]] as const) {
+            const p = o.clone().addScaledVector(sd, len * f).addScaledVector(sAcross, (v - 0.5) * 2 * wHalf * (1 - 0.4 * f))
+            const [uu, vv] = tileUv(TILE.needles, f, v)
+            ids.push(b.vertex(p, sn, [Math.max(0, p.y / H), br, ao, 2], none, uu, vv))
+          }
+          b.tri(ids[0], ids[2], ids[1])
+          b.tri(ids[1], ids[2], ids[3])
+        }
+      }
+    }
   }
   return b
 }

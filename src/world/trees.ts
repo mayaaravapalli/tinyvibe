@@ -310,7 +310,8 @@ function treePatch(key: string, leafTex: Texture): PatchOptions {
           float lm2 = vfNoise3(vRest * 0.42 + 7.0);
           if (vFol.w > 1.5) {
             bool needles = abs(vfTile - 3.0) < 0.5;
-            c = vfLeafColor(vTint, vfCardVar, vFol.z, needles) * mix(0.6, 1.12, vfCardLum);
+            // needle boughs are mostly self-shaded mass: keep their green from sinking to black
+            c = vfLeafColor(vTint, vfCardVar, vFol.z, needles) * (needles ? mix(0.8, 1.35, vfCardLum) : mix(0.6, 1.12, vfCardLum));
           } else {
             // leaf clusters vs. the dark pockets between them (fades to the mean with distance)
             float detail = 1.0 - smoothstep(90.0, 420.0, vfDistV);

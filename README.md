@@ -37,6 +37,10 @@ npm run build      # static build in dist/
 
 Optional URL parameters: `?q=low|medium|high` forces a quality tier.
 
+To check how it runs on a device, add `#debug` to the address or press and
+hold the title for a second. A small readout shows the build, quality tier,
+GPU, frame rate, draw calls, and whether the grass and ground plants are on.
+
 ## How it is built
 
 Everything is procedural and seeded, so the composition is art-directed and

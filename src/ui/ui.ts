@@ -9,6 +9,7 @@ const ICON = {
 }
 
 export interface UiHooks {
+  toggleDebug(): void
   toggleSound(): boolean
   setReducedMotion(v: boolean): void
 }
@@ -70,6 +71,15 @@ export class Ui {
     this.motionBtn.addEventListener('click', () => this.setReduced(!this.reduced))
     this.hideBtn.addEventListener('click', () => this.setHidden(true))
     root.querySelector('.vf-show')!.addEventListener('click', () => this.setHidden(false))
+
+    // press and hold the title for the device readout
+    const title = root.querySelector<HTMLElement>('.vf-title')!
+    let hold = 0
+    title.addEventListener('pointerdown', () => {
+      clearTimeout(hold)
+      hold = window.setTimeout(() => hooks.toggleDebug(), 1000)
+    })
+    for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) title.addEventListener(ev, () => clearTimeout(hold))
 
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement) return

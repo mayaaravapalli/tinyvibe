@@ -1,6 +1,6 @@
 import { BufferAttribute, BufferGeometry, Color, IcosahedronGeometry, Vector3 } from 'three'
 import { TILE, tileUv } from '../render/leafTexture'
-import { growTree, speciesParams } from './branchTree'
+import { growConifer, growTree, speciesParams } from './branchTree'
 import { Builder } from './geoBuilder'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { mulberry32, Simplex2 } from '../core/noise'
@@ -395,6 +395,9 @@ function pine(def: SpeciesDef, lod: Lod, seed: number): BufferGeometry {
 
 export function buildTreeGeometry(id: SpeciesId, lod: Lod, seed: number): BufferGeometry {
   const def = SPECIES[id]
+  if (def.conifer && (lod === 'near' || lod === 'mid')) {
+    return growConifer(id === 'spruce' ? 'spruce' : 'pine', lod, def.height, def.bark, seed).build()
+  }
   if (!def.conifer && (lod === 'near' || lod === 'mid')) {
     const rnd = mulberry32(seed * 7 + 3)
     return growTree(speciesParams(id, lod, def.bark, def.height, rnd), seed).build()

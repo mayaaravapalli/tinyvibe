@@ -90,6 +90,11 @@ body {
   top: max(20px, env(safe-area-inset-top));
   text-shadow: 0 1px 14px rgba(40, 24, 10, 0.45), 0 0 2px rgba(40, 24, 10, 0.3);
   transition: opacity 0.8s var(--vf-ease), transform 0.8s var(--vf-ease);
+  /* holds for the device readout, so no text selection or callout */
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .vf-title h1 {
   margin: 0;
@@ -115,6 +120,7 @@ body {
 .vf-ui[data-mode='dive'] .vf-title {
   opacity: 0.0;
   transform: translateY(-4px);
+  pointer-events: none;
 }
 
 .vf-hint {
