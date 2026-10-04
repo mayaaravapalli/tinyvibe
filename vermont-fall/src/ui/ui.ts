@@ -63,6 +63,7 @@ export class Ui {
     this.motionBtn = root.querySelector('.vf-motion')!
     this.hideBtn = root.querySelector('.vf-hide')!
 
+    this.carTag.tabIndex = -1
     this.carTag.addEventListener('click', () => app.enterRoad())
     this.aerialBtn.addEventListener('click', () => app.leaveRoad())
     this.soundBtn.addEventListener('click', () => this.setSound(hooks.toggleSound()))
@@ -149,9 +150,13 @@ export class Ui {
       const x = (p.x * 0.5 + 0.5) * w
       const y = (-p.y * 0.5 + 0.5) * h
       this.carTag.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`
-      this.carTag.classList.add('is-on')
-    } else {
+      if (!this.carTag.classList.contains('is-on')) {
+        this.carTag.classList.add('is-on')
+        this.carTag.tabIndex = 0
+      }
+    } else if (this.carTag.classList.contains('is-on')) {
       this.carTag.classList.remove('is-on')
+      this.carTag.tabIndex = -1
     }
   }
 }

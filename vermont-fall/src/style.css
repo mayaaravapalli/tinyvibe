@@ -1,8 +1,8 @@
 :root {
   --vf-ink: #fbf3e4;
   --vf-ink-dim: rgba(251, 243, 228, 0.78);
-  --vf-glass: rgba(34, 26, 20, 0.28);
-  --vf-glass-hi: rgba(34, 26, 20, 0.42);
+  --vf-glass: rgba(30, 22, 16, 0.4);
+  --vf-glass-hi: rgba(30, 22, 16, 0.56);
   --vf-line: rgba(251, 243, 228, 0.32);
   --vf-mono: 'Geist Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --vf-serif: 'Fraunces Variable', 'Iowan Old Style', Georgia, serif;
@@ -118,6 +118,7 @@ body {
 }
 
 .vf-hint {
+  text-shadow: 0 1px 6px rgba(20, 12, 6, 0.4);
   position: absolute;
   left: 50%;
   bottom: max(34px, calc(env(safe-area-inset-bottom) + 22px));
@@ -213,6 +214,9 @@ body {
 }
 
 .vf-aerial {
+  white-space: nowrap;
+  text-shadow: 0 1px 6px rgba(20, 12, 6, 0.5);
+  box-shadow: 0 2px 18px rgba(20, 12, 6, 0.18);
   position: absolute;
   left: 50%;
   top: max(20px, env(safe-area-inset-top));
@@ -321,5 +325,10 @@ body {
   }
   .vf-hint {
     font-size: 14px;
+  }
+  .vf-aerial {
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    background: rgba(30, 22, 16, 0.5);
   }
 }

@@ -225,7 +225,8 @@ export class App {
 
     this.car = buildCar(this.env)
     this.scene.add(this.car.root)
-    this.driver = new Driver(this.terrain, 548)
+    // start in the open meadow just past the covered bridge, where the car reads from the sky
+    this.driver = new Driver(this.terrain, this.terrain.bridge.s1 + 22)
     this.pov = new PovRig(this.terrain, this.driver)
     this.resize()
   }
@@ -237,7 +238,7 @@ export class App {
     this.camera.updateProjectionMatrix()
     // portrait screens need a wider lens to keep the composition
     const portrait = h > w
-    this.aerial.fov = portrait ? 46 : 31
+    this.aerial.setFraming(portrait)
     if (this.pov) this.pov.fov = portrait ? 72 : 56
   }
 

@@ -358,8 +358,15 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
           float soil = smoothstep(0.62, 0.8, vfNoise(wp.xz * 1.1 + 9.0));
           vec3 openNear = col * (0.72 + 0.45 * gs);
           openNear = mix(openNear, srgb(0.30, 0.24, 0.16), soil * 0.35);
-          float lc = vfHash12(floor(wp.xz * 5.0));
-          float leafy = step(0.62, vfNoise(wp.xz * 4.7)) * step(0.4, lc);
+          // individual fallen leaves: a small rotated ellipse per 25 cm cell
+          vec2 cellP = wp.xz * 4.0;
+          vec2 cid = floor(cellP);
+          float lc = vfHash12(cid);
+          vec2 q = fract(cellP) - 0.5 - (vfHash22(cid) - 0.5) * 0.4;
+          float la = lc * 6.2831;
+          q = mat2(cos(la), -sin(la), sin(la), cos(la)) * q;
+          float shape = 1.0 - smoothstep(0.85, 1.0, length(q / vec2(0.36, 0.22)));
+          float leafy = shape * step(0.42, lc) * smoothstep(0.35, 0.6, vfNoise(wp.xz * 0.9 + 2.0) + 0.25);
           vec3 leafCol = lc > 0.8 ? srgb(0.70, 0.30, 0.08) : lc > 0.65 ? srgb(0.75, 0.52, 0.14) : lc > 0.5 ? srgb(0.52, 0.12, 0.08) : srgb(0.40, 0.26, 0.14);
           vec3 floorNear = mix(col * (0.8 + 0.3 * gs), leafCol, leafy * 0.8);
           float fm = smoothstep(0.25, 0.75, forest);

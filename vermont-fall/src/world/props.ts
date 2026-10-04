@@ -27,6 +27,12 @@ import { CLEARINGS, TELEPHONE_RUN, type V2 } from './layout'
 import type { Terrain } from './terrain'
 
 const SRGB = 'vec3 srgb(float r, float g, float b) { return pow(vec3(r, g, b), vec3(2.2)); }'
+
+/** roadside split-rail fences: [from s, to s, lateral offset] */
+export const FENCE_RUNS: [number, number, number][] = [
+  [705, 1010, 7.4],
+  [585, 700, -7.6],
+]
 const _m = new Matrix4()
 const UP = new Vector3(0, 1, 0)
 
@@ -202,8 +208,7 @@ function fences(T: Terrain, group: Group) {
     if (pts.length > 1) fenceAlong(pts, posts, rails, rnd)
   }
   // the farm frontage and the meadow after the bridge
-  along(705, 1010, 7.4)
-  along(585, 700, -7.6)
+  for (const [a, b, lat] of FENCE_RUNS) along(a, b, lat)
   // around the hay field, inset from its ragged edge
   const field = CLEARINGS.find((c) => c.kind === 'field')!
   const poly = inset(field.poly, 9)

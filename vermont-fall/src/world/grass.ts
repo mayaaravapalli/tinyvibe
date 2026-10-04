@@ -16,6 +16,7 @@ import { patchMaterial } from '../render/shared'
 import { forestDensity } from './forest'
 import type { Terrain } from './terrain'
 import type { TreeData } from './trees'
+import { FENCE_RUNS } from './props'
 
 /**
  * Ground detail along the road corridor, seen only from the car: golden autumn
@@ -255,6 +256,25 @@ export class GroundDetail {
         const sc = 0.09 + rnd() * 0.07
         ls.push(x, ry + 0.01, z, Math.floor(sc * 100 * 10) / 10 + rnd() * 0.999)
         lc.push(tint[0] * fade + 0.18 * (1 - fade), tint[1] * fade + 0.1 * (1 - fade), tint[2] * fade + 0.04 * (1 - fade), Math.floor(rnd() * 4))
+      }
+      // leaves blown against the fence rails pile up along their foot
+      for (const [fa, fb, flat] of FENCE_RUNS) {
+        if (c0 + CHUNK < fa || c0 > fb) continue
+        for (let k = 0; k < CHUNK * 7 * density; k++) {
+          const s = c0 + rnd() * CHUNK
+          if (s < fa || s > fb) continue
+          r.sample(s, f)
+          // windward side of the rails, bunched up
+          const lat = flat - Math.sign(flat) * Math.pow(rnd(), 2.2) * 0.9 + (rnd() - 0.5) * 0.25
+          const x = f.x - f.tz * lat, z = f.z + f.tx * lat
+          const y = T.heightAt(x, z)
+          const hueR = rnd()
+          const base = hueR < 0.4 ? [0.62, 0.2, 0.04] : hueR < 0.7 ? [0.7, 0.42, 0.06] : hueR < 0.85 ? [0.42, 0.07, 0.05] : [0.36, 0.22, 0.1]
+          const fade = 0.55 + rnd() * 0.45
+          const sc = 0.09 + rnd() * 0.07
+          ls.push(x, y + 0.01 + rnd() * 0.04, z, Math.floor(sc * 100 * 10) / 10 + rnd() * 0.999)
+          lc.push(base[0] * fade + 0.15 * (1 - fade), base[1] * fade + 0.08 * (1 - fade), base[2] * fade + 0.03 * (1 - fade), Math.floor(rnd() * 4))
+        }
       }
       if (!n) continue
       center.multiplyScalar(1 / n)

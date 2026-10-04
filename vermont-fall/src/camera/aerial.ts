@@ -18,6 +18,23 @@ export class AerialRig {
   dist = 1600
   fov = 31
 
+  /** Two art-directed framings: wide for landscape, a taller look down the valley for portrait. */
+  setFraming(portrait: boolean) {
+    if (portrait) {
+      this.target.set(160, 0, -110)
+      this.yaw = MathUtils.degToRad(-2)
+      this.pitch = MathUtils.degToRad(29)
+      this.dist = 2000
+      this.fov = 46
+    } else {
+      this.target.set(50, 0, -170)
+      this.yaw = MathUtils.degToRad(3)
+      this.pitch = MathUtils.degToRad(19)
+      this.dist = 1600
+      this.fov = 31
+    }
+  }
+
   // live state
   private zoom = 1
   private zoomGoal = 1
