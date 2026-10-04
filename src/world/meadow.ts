@@ -65,9 +65,12 @@ vec4 vfMeadowAt(vec2 p) {
 export const GLSL_MEADOW_TONE = /* glsl */ `
 vec3 vfSrgb(vec3 c) { return pow(c, vec3(2.2)); }
 vec3 vfMeadowTone(vec2 p, float kind, float roadD, float r) {
-  float big = vfFbm(p * 0.016 + 3.0);
-  float mid = vfFbm(p * 0.055 + 11.0);
-  float small = vfNoise(p * 0.3 + 5.0);
+  // rotated and warped, so the drifts never show the noise grid's boxy contours
+  vec2 q = mat2(0.8, -0.6, 0.6, 0.8) * p;
+  q += (vec2(vfNoise(q * 0.021 + 7.0), vfNoise(q * 0.021 + 19.0)) - 0.5) * 46.0;
+  float big = vfFbm(q * 0.016 + 3.0);
+  float mid = vfFbm(q * 0.055 + 11.0);
+  float small = vfNoise(q * 0.3 + 5.0);
   vec3 tawny = vfSrgb(vec3(0.70, 0.56, 0.34));
   vec3 straw = vfSrgb(vec3(0.80, 0.71, 0.52));
   vec3 russet = vfSrgb(vec3(0.62, 0.37, 0.24));
@@ -76,10 +79,10 @@ vec3 vfMeadowTone(vec2 p, float kind, float roadD, float r) {
   vec3 lawn = vfSrgb(vec3(0.41, 0.48, 0.23));
   vec3 c = mix(tawny, straw, smoothstep(0.38, 0.68, mid) * 0.65);
   // little bluestem grows in drifts and turns copper-red in October
-  float blue = smoothstep(0.5, 0.62, big + (mid - 0.47) * 0.5 + (small - 0.5) * 0.1);
-  c = mix(c, mix(russet, rust, smoothstep(0.4, 0.7, small)), blue * 0.85);
+  float blue = smoothstep(0.45, 0.68, big + (mid - 0.47) * 0.45);
+  c = mix(c, mix(russet, rust, smoothstep(0.3, 0.8, small)), blue * 0.68);
   // damp low spots and the field margins hold on to green
-  c = mix(c, green, smoothstep(0.56, 0.7, 1.0 - big + (mid - 0.5) * 0.4) * 0.75);
+  c = mix(c, green, smoothstep(0.52, 0.74, 1.0 - big + (mid - 0.5) * 0.4) * 0.65);
   // mown verges and lawns: shorter and greener
   float mown = max(1.0 - smoothstep(8.5, 11.0, roadD), smoothstep(0.3, 0.45, kind) * (1.0 - smoothstep(0.6, 0.75, kind)));
   c = mix(c, mix(lawn, tawny, 0.4), mown * 0.65);
