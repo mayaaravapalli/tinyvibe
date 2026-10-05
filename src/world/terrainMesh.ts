@@ -3,13 +3,14 @@ import {
   BufferAttribute,
   BufferGeometry,
   Group,
+  type Material,
   Mesh,
   Sphere,
   MeshLambertMaterial,
   Vector3,
   Vector4,
 } from 'three'
-import { smoothstep } from '../core/noise'
+import { Simplex2, smoothstep } from '../core/noise'
 import { patchMaterial } from '../render/shared'
 import { FAR, NEAR, NEAR_STEP, type Terrain } from './terrain'
 import { TREE_RECT, forestDensity, treeRegionWeight } from './forest'
@@ -214,14 +215,17 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     }
   }
 
+  // the coarse land, and a copy for the brook's fine corridor mesh (which must not step aside)
+  const makeMat = (channel: boolean) => {
   const mat = new MeshLambertMaterial({ color: 0xffffff })
   patchMaterial(mat, {
-    key: 'terrain',
+    key: channel ? 'terrain-channel' : 'terrain',
     cloudShadows: true,
     sunVis: 'vSunVis',
     uniforms: {
       uTreeRect: { value: new Vector4(TREE_RECT.minX, TREE_RECT.minZ, TREE_RECT.maxX, TREE_RECT.maxZ) },
       uTreeFeather: { value: TREE_RECT.feather },
+      uChannel: { value: channel ? 1 : 0 },
       ...GROUND_U,
     },
     vertexPars: /* glsl */ `
@@ -241,6 +245,7 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
       varying vec3 vWN;
       uniform vec4 uTreeRect;
       uniform float uTreeFeather;
+      uniform float uChannel;
       uniform sampler2D uWindTex;
       uniform vec4 uWindRect;
       uniform vec2 uAmbientWind;
@@ -330,6 +335,9 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     fragmentColor: /* glsl */ `
       {
         vec3 wp = vAtmoWorld;
+        // the brook's channel is narrower than this 5 m grid can draw (its banks came out
+        // saw-toothed); a fine corridor mesh draws it, and the coarse land steps aside
+        if (uChannel < 0.5 && abs(wp.x) < -uGround.x - 10.0 && abs(wp.z) < -uGround.x - 10.0 && vfMeadowAt(wp.xz).a > 0.12) discard;
         vec3 N = normalize(vWN);
         float forest = vMask.x;
         float ftype = vMask.y;
@@ -412,7 +420,9 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
       }
     `,
   })
-
+  return mat
+  }
+  const mat = makeMat(false)
   // hills already carry their baked golden-hour shadows, so the land casts none
   const mesh = new Group()
   mesh.name = 'terrain'
@@ -450,6 +460,82 @@ export function buildTerrainMesh(T: Terrain, sunDir: Vector3): TerrainBuild {
     const m = (ii: number, jj: number) => hs[jj * N + ii]
     return (m(i, j) * (1 - tx) + m(i + 1, j) * tx) * (1 - tz) + (m(i, j + 1) * (1 - tx) + m(i + 1, j + 1) * tx) * tz
   }
+  mesh.add(buildChannel(T, makeMat(true), sunVisAt, (x, z) => {
+    const ck = T.clearingKind(x, z)
+    return ck ? kind[ck] : 0
+  }))
   const ground: GroundGrid = { n: gridN, min: -NEAR, step: NEAR_STEP, height: T.heights, meadow }
   return { mesh, coarse, sunVisAt, groundAt, ground }
+}
+
+/**
+ * The brook's corridor at 1 m resolution. Its channel is only ~8 m across, which
+ * the 5 m land grid can't follow; this strip carries the true banks so the
+ * water's edge runs smooth. Same material as the land, so the seams don't show.
+ */
+function buildChannel(T: Terrain, mat: Material, sunVisAt: (x: number, z: number) => number, kindAt: (x: number, z: number) => number): Mesh {
+  const st = T.stream
+  const bankNoise = new Simplex2(4242)
+  const offs = [-14, -12, -10.5, -9, -8, -7, -6, -5, -4.25, -3.5, -2.75, -2, -1, 0, 1, 2, 2.75, 3.5, 4.25, 5, 6, 7, 8, 9, 10.5, 12, 14]
+  const cols = offs.length
+  const step = 1.25
+  const rowsS: number[] = []
+  const p = { x: 0, z: 0, tx: 0, tz: 0 }
+  const lim = NEAR - 20
+  for (let s = 0; s <= st.length; s += step) {
+    st.sample(s, p)
+    if (Math.abs(p.x) > lim || Math.abs(p.z) > lim) continue
+    rowsS.push(s)
+  }
+  const rows = rowsS.length
+  const pos = new Float32Array(rows * cols * 3)
+  const mask = new Float32Array(rows * cols * 4)
+  for (let j = 0; j < rows; j++) {
+    st.sample(rowsS[j], p)
+    for (let i = 0; i < cols; i++) {
+      const k = j * cols + i
+      const u = offs[i]
+      const x = p.x - p.tz * u, z = p.z + p.tx * u
+      pos[k * 3] = x
+      // a little relief along the waterline, so the edge meanders like a real brook's
+      const au = Math.abs(u)
+      const relief = smoothstep(1.6, 3.4, au) * (1 - smoothstep(6.5, 9.5, au))
+      pos[k * 3 + 1] = T.compute(x, z) + relief * (bankNoise.noise(x * 0.16, z * 0.16) * 0.38 + bankNoise.noise(x * 0.55 + 7, z * 0.55) * 0.14)
+      pos[k * 3 + 2] = z
+      mask[k * 4] = forestDensity(T, x, z)
+      mask[k * 4 + 1] = kindAt(x, z)
+      mask[k * 4 + 2] = 1 - smoothstep(2.5, 10, Math.abs(u))
+      mask[k * 4 + 3] = sunVisAt(x, z)
+    }
+  }
+  const idx: number[] = []
+  for (let j = 0; j < rows - 1; j++) {
+    // a gap in the rows (the stream leaving the detailed land) breaks the strip
+    if (rowsS[j + 1] - rowsS[j] > step * 1.5) continue
+    for (let i = 0; i < cols - 1; i++) {
+      const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1
+      idx.push(a, c, b, b, c, d)
+    }
+  }
+  const geo = new BufferGeometry()
+  geo.setAttribute('position', new BufferAttribute(pos, 3))
+  geo.setAttribute('aMask', new BufferAttribute(mask, 4))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()
+  // wound to face up
+  const n = geo.getAttribute('normal') as BufferAttribute
+  if (n.getY(Math.floor(cols / 2)) < 0) {
+    for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i))
+    const ix = geo.getIndex()!
+    for (let i = 0; i < ix.count; i += 3) {
+      const t = ix.getX(i + 1)
+      ix.setX(i + 1, ix.getX(i + 2))
+      ix.setX(i + 2, t)
+    }
+  }
+  geo.computeBoundingSphere()
+  const m = new Mesh(geo, mat)
+  m.name = 'brook-channel'
+  m.receiveShadow = true
+  return m
 }

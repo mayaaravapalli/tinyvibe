@@ -364,6 +364,25 @@ function stones(T: Terrain, group: Group) {
     const sc = 1 + rnd() * 2.8
     boulders.push({ pos: new Vector3(x, T.heightAt(x, z) - sc * 0.15, z), quat: new Quaternion().setFromAxisAngle(UP, rnd() * 6.28), scale: new Vector3(sc * 1.8, sc * 0.55, sc) })
   }
+  // brook stones: along both waterlines and a few breaking the surface (own random
+  // stream, so nothing above moves). Set on the true banks the brook's fine mesh draws.
+  const brnd = mulberry32(5150)
+  const st = T.stream
+  const sp = { x: 0, z: 0, tx: 0, tz: 0 }
+  for (let s = 40; s < st.length; s += 1.2 + brnd() * 2.6) {
+    st.sample(s, sp)
+    if (Math.abs(sp.x) > 1360 || Math.abs(sp.z) > 1360) continue
+    if (T.roadNearest(sp.x, sp.z, 14, hit)) continue
+    const inStream = brnd() < 0.22
+    const lat = inStream ? (brnd() - 0.5) * 4.6 : (brnd() > 0.5 ? 1 : -1) * (3.3 + brnd() * 2.4)
+    const x = sp.x - sp.tz * lat, z = sp.z + sp.tx * lat
+    const sc = inStream ? 0.35 + brnd() * 0.5 : 0.35 + Math.pow(brnd(), 1.6) * 1.3
+    boulders.push({
+      pos: new Vector3(x, Math.max(T.compute(x, z), T.streamBedAt(s) + 0.1) + sc * 0.05, z),
+      quat: new Quaternion().setFromAxisAngle(UP, brnd() * 6.28),
+      scale: new Vector3(sc * (1.1 + brnd() * 0.7), sc * (0.5 + brnd() * 0.3), sc),
+    })
+  }
   group.add(instanced(stoneGeometry(9), lichen, boulders))
 }
 
